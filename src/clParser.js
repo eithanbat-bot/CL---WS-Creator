@@ -42,7 +42,7 @@
     if(typeof v==='number'&&Number.isFinite(v))return v;
     const m=clean(v).replace(/,/g,'').match(/-?\d+(?:\.\d+)?/);return m?Number(m[0]):NaN;
   }
-  function sheetMultiplier(sheetName){const m=clean(sheetName).match(/\(\s*x\s*(\d+(?:\.\d+)?)\s*\)/i);return m?Number(m[1]):1;}
+  function sheetBatchMultiplier(sheetName){const m=clean(sheetName).match(/\(\s*x\s*(\d+(?:\.\d+)?)\s*\)/i);return m?Number(m[1]):1;}
   function parseSheet(matrix,mapping={}){
     if(!matrix||!matrix.length)return [];
     const located=locateHeaderRow(matrix), headers=located.headers, partIdx=findColumn(headers,'part'), qtyIdx=findColumn(headers,'qty');
@@ -52,13 +52,12 @@
     for(let i=located.row+1;i<matrix.length;i++){
       const r=matrix[i]||[], part=clean(r[partIdx]); if(!part)continue;
       const material=normalizeMaterial(r[matIdx]); let qty=qtyIdx>=0?toNumber(r[qtyIdx]):NaN;
-      const qpu=qpuIdx>=0?toNumber(r[qpuIdx]):NaN, units=unitsIdx>=0?toNumber(r[unitsIdx]):NaN;
-      if(!Number.isFinite(qty)&&Number.isFinite(qpu))qty=qpu*(Number.isFinite(units)?units:1);
+      const qpu=qpuIdx>=0?toNumber(r[qpuIdx]):NaN;
+      if(!Number.isFinite(qty)&&Number.isFinite(qpu))qty=qpu;
       const thickness=clean(r[thkIdx])||thicknessFromMaterial(material);
       if(!Number.isFinite(qty))continue;
-      const multiplier=sheetMultiplier(mapping.sheet||'');
-      const totalQty=qty*multiplier;
-      rows.push({sheet:mapping.sheet||'',sourceRow:i+1,part,qty:totalQty,baseQty:qty,sheetMultiplier:multiplier,material,thickness,rawMaterial:clean(r[matIdx]),status:totalQty>0?'READY':(totalQty===0?'ZERO_QTY':'NEGATIVE_QTY')});
+      const batchMultiplier=sheetBatchMultiplier(mapping.sheet||'');
+      rows.push({sheet:mapping.sheet||'',sourceRow:i+1,part,qty,baseQty:qty,batchMultiplier,material,thickness,rawMaterial:clean(r[matIdx]),status:qty>0?'READY':(qty===0?'ZERO_QTY':'NEGATIVE_QTY')});
     }
     return rows;
   }
@@ -66,11 +65,11 @@
     const map=new Map();
     for(const r of rows){
       if(r.status!=='READY')continue;
-      const key=[normalize(r.part).toUpperCase(),normalizeMaterial(r.material).toUpperCase(),normalize(r.thickness).toUpperCase()].join('|');
+      const key=[normalize(r.sheet).toUpperCase(),normalize(r.part).toUpperCase(),normalizeMaterial(r.material).toUpperCase(),normalize(r.thickness).toUpperCase()].join('|');
       if(!map.has(key))map.set(key,{...r,sourceSheets:[r.sheet],sourceRows:[r.sourceRow]});
       else{const x=map.get(key);x.qty+=r.qty;x.sourceSheets.push(r.sheet);x.sourceRows.push(r.sourceRow);}
     }
     return [...map.values()];
   }
-  window.CLParser={parseSheet,consolidate,findColumn,normalizeMaterial,thicknessFromMaterial,parseJobNumber,sheetMultiplier,clean};
+  window.CLParser={parseSheet,consolidate,findColumn,normalizeMaterial,thicknessFromMaterial,parseJobNumber,sheetBatchMultiplier,clean};
 })();
