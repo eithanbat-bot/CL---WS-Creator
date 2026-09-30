@@ -42,6 +42,7 @@
     if(typeof v==='number'&&Number.isFinite(v))return v;
     const m=clean(v).replace(/,/g,'').match(/-?\d+(?:\.\d+)?/);return m?Number(m[0]):NaN;
   }
+  function sheetMultiplier(sheetName){const m=clean(sheetName).match(/\(\s*x\s*(\d+(?:\.\d+)?)\s*\)/i);return m?Number(m[1]):1;}
   function parseSheet(matrix,mapping={}){
     if(!matrix||!matrix.length)return [];
     const located=locateHeaderRow(matrix), headers=located.headers, partIdx=findColumn(headers,'part'), qtyIdx=findColumn(headers,'qty');
@@ -55,7 +56,9 @@
       if(!Number.isFinite(qty)&&Number.isFinite(qpu))qty=qpu*(Number.isFinite(units)?units:1);
       const thickness=clean(r[thkIdx])||thicknessFromMaterial(material);
       if(!Number.isFinite(qty))continue;
-      rows.push({sheet:mapping.sheet||'',sourceRow:i+1,part,qty,material,thickness,rawMaterial:clean(r[matIdx]),status:qty>0?'READY':(qty===0?'ZERO_QTY':'NEGATIVE_QTY')});
+      const multiplier=sheetMultiplier(mapping.sheet||'');
+      const totalQty=qty*multiplier;
+      rows.push({sheet:mapping.sheet||'',sourceRow:i+1,part,qty:totalQty,baseQty:qty,sheetMultiplier:multiplier,material,thickness,rawMaterial:clean(r[matIdx]),status:totalQty>0?'READY':(totalQty===0?'ZERO_QTY':'NEGATIVE_QTY')});
     }
     return rows;
   }
@@ -69,5 +72,5 @@
     }
     return [...map.values()];
   }
-  window.CLParser={parseSheet,consolidate,findColumn,normalizeMaterial,thicknessFromMaterial,parseJobNumber,clean};
+  window.CLParser={parseSheet,consolidate,findColumn,normalizeMaterial,thicknessFromMaterial,parseJobNumber,sheetMultiplier,clean};
 })();
