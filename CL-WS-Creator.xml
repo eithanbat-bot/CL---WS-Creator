@@ -1,55 +1,24 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-           xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
-           xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>d18c5654-6697-422d-8422-175b13623079</Id>
-  <Version>0.2.0.0</Version>
+  <Version>0.2.1.0</Version>
   <ProviderName>CL - WS Creator</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="CL - WS Creator"/>
   <Description DefaultValue="Build SigmaNEST jobs from a cutting list using the local SigmaNEST .PRS Part List."/>
   <IconUrl DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/assets/icon-80.png"/>
-  <SupportUrl DefaultValue="https://github.com/eithanbat-bot/CL---WS-Creator"/>
-  <Hosts><Host Name="Workbook"/></Hosts>
-  <Requirements><Sets DefaultMinVersion="1.1"><Set Name="ExcelApi" MinVersion="1.1"/></Sets></Requirements>
-  <DefaultSettings><SourceLocation DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html"/></DefaultSettings>
+  <Hosts>
+    <Host Name="Workbook"/>
+  </Hosts>
+  <Requirements>
+    <Sets DefaultMinVersion="1.1">
+      <Set Name="ExcelApi" MinVersion="1.1"/>
+    </Sets>
+  </Requirements>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html"/>
+  </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
-  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
-    <Requirements><bt:Sets DefaultMinVersion="1.3"><bt:Set Name="ExcelApi" MinVersion="1.3"/></bt:Sets></Requirements>
-    <Hosts><Host xsi:type="Workbook"><DesktopFormFactor>
-      <GetStarted><Title resid="Welcome.Title"/><Description resid="Welcome.Description"/><LearnMoreUrl resid="LearnMore.Url"/></GetStarted>
-      <ExtensionPoint xsi:type="PrimaryCommandSurface"><OfficeTab id="TabHome"><Group id="CLWSCreatorGroup">
-        <Label resid="GroupLabel"/>
-        <Control xsi:type="Button" id="OpenCLWSCreator">
-          <Label resid="ButtonLabel"/>
-          <Supertip><Title resid="ButtonLabel"/><Description resid="ButtonDescription"/></Supertip>
-          <Icon><bt:Image size="16" resid="Icon.16"/><bt:Image size="32" resid="Icon.32"/><bt:Image size="80" resid="Icon.80"/></Icon>
-          <Action xsi:type="ShowTaskpane"><SourceLocation resid="Taskpane.Url"/></Action>
-        </Control>
-      </Group></OfficeTab></ExtensionPoint>
-    </DesktopFormFactor></Host></Hosts>
-    <Resources>
-      <bt:Images>
-        <bt:Image id="Icon.16" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/assets/icon-16.png"/>
-        <bt:Image id="Icon.32" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/assets/icon-32.png"/>
-        <bt:Image id="Icon.80" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/assets/icon-80.png"/>
-      </bt:Images>
-      <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html"/>
-        <bt:Url id="LearnMore.Url" DefaultValue="https://github.com/eithanbat-bot/CL---WS-Creator"/>
-      </bt:Urls>
-      <bt:ShortStrings>
-        <bt:String id="GroupLabel" DefaultValue="CL - WS Creator"/>
-        <bt:String id="ButtonLabel" DefaultValue="Create SigmaNEST WS"/>
-        <bt:String id="Welcome.Title" DefaultValue="CL - WS Creator"/>
-      </bt:ShortStrings>
-      <bt:LongStrings>
-        <bt:String id="ButtonDescription" DefaultValue="Open CL - WS Creator and build a SigmaNEST job from selected cutting-list sheets."/>
-        <bt:String id="Welcome.Description" DefaultValue="Build a SigmaNEST job from your CL using the local .PRS Part List."/>
-      </bt:LongStrings>
-    </Resources>
-  </VersionOverrides>
 </OfficeApp>
