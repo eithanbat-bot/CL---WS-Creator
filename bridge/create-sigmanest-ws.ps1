@@ -14,6 +14,7 @@ try{
   $safe=($job -replace '[^A-Za-z0-9._ -]','_').Trim()
   if([string]::IsNullOrWhiteSpace($safe)){$safe='CL_JOB'}
   $wsPath=Join-Path $wsDir ($safe+'.ws')
+  if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
   $auto.FileNew()
   try{$app.PartsLibrary.Directory=[string]$req.libraryRoot}catch{}
   $created=@()
@@ -32,6 +33,7 @@ try{
     try{$part.Material=[string]$x.sigmaMaterial}catch{}
     try{$part.Thickness=[double]$x.thicknessMm}catch{}
     try{$part.WONumber=$safe}catch{}
+    try{$part.DrawingNumber=[string]$x.part}catch{}
     $created += [pscustomobject]@{part=$part.Name;qty=$part.QtyToNest;material=$part.Material;thickness=$part.Thickness;path=$part.Path}
   }
   $app.SaveWorkSpaceFile($wsPath)
