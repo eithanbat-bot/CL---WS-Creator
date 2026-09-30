@@ -5,7 +5,8 @@ function inspectPrs(file){
   const b=fs.readFileSync(file),strings=[...new Set([...strings8(b),...strings16(b)].filter(Boolean))],stem=path.basename(file,path.extname(file));
   const embedded=strings.find(function(s){return s.indexOf(stem)===0})||stem;
   const sourceDxf=strings.find(function(s){return /\.(dxf|dwg)$/i.test(s)})||'';
-  const material=strings.find(function(s){return /armox|ramor|s355|s690|hardox|chromodeck|mild steel|strenx|aluminium|aluminum|stainless/i.test(s)})||'';
+  const materialPatterns=/^(armox(?:\s+advance|\s+\d+)?|ramor(?:\s+\d+)?|s\d{3,4}|hardox(?:\s+\d+)?|chromodeck|mild steel|strenx(?:\s+\d+)?|aluminium|aluminum|stainless(?: steel)?)$/i;
+  const material=strings.find(function(s){return materialPatterns.test(s.trim())})||strings.filter(function(s){return /armox|ramor|s355|s690|hardox|chromodeck|mild steel|strenx|aluminium|aluminum|stainless/i.test(s)&&s.length<80}).sort(function(a,b){return a.length-b.length})[0]||'';
   const m=material.match(/(\d+(?:\.\d+)?)\s*mm/i)||embedded.match(/-\s*(\d+(?:\.\d+)?)\s*mm/i)||[];
   const rotations=strings.find(function(s){return /^0\s*,?\s*90\s*,?\s*180\s*,?\s*270$/i.test(s)})||'';
   return {file:path.resolve(file),fileName:path.basename(file),partName:stem,embeddedPartName:embedded,likelyMaterial:material,thickness:m[1]?(m[1]+'mm'):'',sourceDxf:sourceDxf,rotations:rotations};
