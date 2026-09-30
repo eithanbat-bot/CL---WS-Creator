@@ -29,12 +29,11 @@ try{
     }
     if($null -eq $part){throw ('SigmaNEST could not load part: '+$prs)}
     try{$part.QtyToNest=[int][math]::Round([double]$x.qty)}catch{}
-    try{$part.BatchQty=[int][math]::Round([double]$x.qty)}catch{}
     try{$part.Material=[string]$x.sigmaMaterial}catch{}
     try{$part.Thickness=[double]$x.thicknessMm}catch{}
     try{$part.WONumber=$safe}catch{}
     try{$part.DrawingNumber=[string]$x.part}catch{}
-    $created += [pscustomobject]@{part=$part.Name;qty=$part.QtyToNest;material=$part.Material;thickness=$part.Thickness;path=$part.Path}
+    $created += [pscustomobject]@{part=$part.Name;qty=$part.QtyToNest;material=$part.Material;thickness=$part.Thickness;path=$part.Path;batchMultiplier=$x.batchMultiplier}
   }
   $app.SaveWorkSpaceFile($wsPath)
   try{$app.LoadWorkSpaceFile($wsPath)}catch{}
