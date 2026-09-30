@@ -1,6 +1,6 @@
 {
   "name": "cl-ws-creator",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Excel add-in and local bridge for converting cutting lists into SigmaNEST job packages using a local PRS part library.",
   "scripts": {"start": "node dev-server.js", "start:bridge": "node bridge/server.js"},
