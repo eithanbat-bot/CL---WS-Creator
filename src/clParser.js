@@ -65,11 +65,19 @@
     const map=new Map();
     for(const r of rows){
       if(r.status!=='READY')continue;
-      const key=[normalize(r.sheet).toUpperCase(),normalize(r.part).toUpperCase(),normalizeMaterial(r.material).toUpperCase(),normalize(r.thickness).toUpperCase()].join('|');
+      // Consolidate the same part/material/thickness across every selected CL sheet.
+      // Keep material and thickness in the key so different material variants are not merged.
+      const key=[normalize(r.part).toUpperCase(),normalizeMaterial(r.material).toUpperCase(),normalize(r.thickness).toUpperCase()].join('|');
       if(!map.has(key))map.set(key,{...r,sourceSheets:[r.sheet],sourceRows:[r.sourceRow]});
-      else{const x=map.get(key);x.qty+=r.qty;x.sourceSheets.push(r.sheet);x.sourceRows.push(r.sourceRow);}
+      else{
+        const x=map.get(key);
+        x.qty+=r.qty;
+        x.sourceSheets.push(r.sheet);
+        x.sourceRows.push(r.sourceRow);
+      }
     }
     return [...map.values()];
   }
   window.CLParser={parseSheet,consolidate,findColumn,normalizeMaterial,thicknessFromMaterial,parseJobNumber,sheetBatchMultiplier,clean};
 })();
+
