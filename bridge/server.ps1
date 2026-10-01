@@ -87,6 +87,12 @@ function Get-Strings16([byte[]]$b) {
   $s = [Text.Encoding]::Unicode.GetString($b)
   [regex]::Matches($s,'[\x20-\x7E]{4,}') | ForEach-Object {$_.Value}
 }
+function Set-Prop($obj,[string]$name,$value){
+  if([string]::IsNullOrWhiteSpace($name)){return}
+  try{ $obj | Add-Member -MemberType NoteProperty -Name $name -Value $value -Force }catch{}
+  return $obj
+}
+
 function Inspect-Prs([string]$file) {
   $b=[IO.File]::ReadAllBytes($file)
   $strings = @((Get-Strings8 $b)+(Get-Strings16 $b) | Where-Object {$_} | Select-Object -Unique)
@@ -184,12 +190,12 @@ function Ensure-Metadata($item) {
   try{
     $meta=Inspect-Prs ([string]$item.file)
     foreach($p in $meta.PSObject.Properties){
-      $item|Add-Member NoteProperty $p.Name $p.Value -Force
+      Set-Prop $item ([string]$p.Name) $p.Value | Out-Null
     }
-    $item|Add-Member NoteProperty metadataLoaded $true -Force
+    Set-Prop $item 'metadataLoaded' $true | Out-Null
   }catch{
     $item|Add-Member NoteProperty metadataLoaded $true -Force
-    $item|Add-Member NoteProperty metadataError $_.Exception.Message -Force
+    Set-Prop $item 'metadataError' $_.Exception.Message | Out-Null
   }
   return $item
 }
@@ -200,7 +206,7 @@ function Find-Part([string]$part){
   $h=@($script:INDEX|Where-Object {(Normalize $_.partName) -eq $n}|Select-Object -First 1)
   if($h.Count){
     Ensure-Metadata $h[0] | Out-Null
-    $h[0]|Add-Member NoteProperty matchType EXACT -Force
+    Set-Prop $h[0] 'matchType' 'EXACT' | Out-Null
     return $h[0]
   }
 
@@ -210,7 +216,7 @@ function Find-Part([string]$part){
   }|Select-Object -First 1)
   if($h.Count){
     Ensure-Metadata $h[0] | Out-Null
-    $h[0]|Add-Member NoteProperty matchType EMBEDDED -Force
+    Set-Prop $h[0] 'matchType' 'EMBEDDED' | Out-Null
     return $h[0]
   }
 
@@ -218,7 +224,7 @@ function Find-Part([string]$part){
   $vars=@($script:INDEX|Where-Object {(VariationKey $_.partName)-eq $vk})
   if($vars.Count -eq 1){
     Ensure-Metadata $vars[0] | Out-Null
-    $vars[0]|Add-Member NoteProperty matchType VARIATION -Force
+    Set-Prop $vars[0] 'matchType' 'VARIATION' | Out-Null
     return $vars[0]
   }
   if($vars.Count -gt 1){return [pscustomobject]@{ambiguous=$vars}}
@@ -262,16 +268,16 @@ function Handle-Request($req){
     $parts=@()
     foreach($p in @($b.parts)){
       $f=Find-Part ([string]$p.part)
-      if(-not$f){$p|Add-Member NoteProperty status MISSING -Force;$p|Add-Member NoteProperty statusLabel 'GEOMETRY MISSING' -Force;$parts+=$p;continue}
+      if(-not$f){Set-Prop $p 'status' 'MISSING' | Out-Null;Set-Prop $p 'statusLabel' 'GEOMETRY MISSING' | Out-Null;$parts+=$p;continue}
       if($f.PSObject.Properties.Name -contains 'ambiguous'){
-        $p|Add-Member NoteProperty status REVIEW -Force;$p|Add-Member NoteProperty statusLabel ('AMBIGUOUS ('+$f.ambiguous.Count+')') -Force;$parts+=$p;continue
+        Set-Prop $p 'status' 'REVIEW' | Out-Null;Set-Prop $p 'statusLabel' ('AMBIGUOUS ('+$f.ambiguous.Count+')') | Out-Null;$parts+=$p;continue
       }
       $libMat=[string]$f.likelyMaterial;$libThk=[string]$f.thickness
       $matKnown=!!$libMat.Trim();$thkKnown=!!$libThk.Trim();$mok=$matKnown -and (Material-Equal $p.material $libMat);$tok=$thkKnown -and !!$p.thickness -and ((Thickness-Number $p.thickness) -eq (Thickness-Number $libThk));$variation=([string]$f.matchType -eq 'VARIATION')
       $status=if($matKnown -and $thkKnown -and $mok -and $tok -and -not$variation){'READY'}else{'REVIEW'}
       $label=if($status -eq 'READY'){'FOUND'}elseif($variation){'VARIATION - REVIEW'}elseif(-not$matKnown){'MATERIAL NOT CONFIRMED'}elseif(-not$mok){'MATERIAL MISMATCH'}elseif(-not$thkKnown){'THICKNESS NOT CONFIRMED'}elseif(-not$tok){'THICKNESS MISMATCH'}else{'REVIEW'}
-      $p|Add-Member NoteProperty status $status -Force;$p|Add-Member NoteProperty statusLabel $label -Force
-      foreach($kv in @{'file'=$f.file;'prs'=$f.file;'sourceDxf'=$f.sourceDxf;'matchType'=$f.matchType;'libraryMaterial'=$libMat;'libraryThickness'=$libThk}){$p|Add-Member NoteProperty $kv.Key $kv.Value -Force}
+      Set-Prop $p 'status' $status | Out-Null;Set-Prop $p 'statusLabel' $label | Out-Null
+      Set-Prop $p 'file' $f.file | Out-Null;Set-Prop $p 'prs' $f.file | Out-Null;Set-Prop $p 'sourceDxf' $f.sourceDxf | Out-Null;Set-Prop $p 'matchType' $f.matchType | Out-Null;Set-Prop $p 'libraryMaterial' $libMat | Out-Null;Set-Prop $p 'libraryThickness' $libThk | Out-Null
       $parts+=$p
     }
     $review=@($parts|Where-Object {$_.status -ne 'READY'})
