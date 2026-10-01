@@ -346,6 +346,8 @@ async function scan(){
         $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(ds.filesFound||r.dxfCount||0)+' .DXF indexed recursively. Libraries ready.';
         pill('Libraries ready','ok');
       }else if(ds.state==='FAILED'){
+        var detail=ds.message||'Unknown DXF indexer failure.';
+        $('libraryStatus').textContent='DXF indexing FAILED under '+dxfRoot+'. '+detail;
         pill('DXF index failed','bad');
       }else{
         pill('DXF indexing','neutral');
