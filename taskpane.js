@@ -233,6 +233,5 @@ Office.onReady(async function(info){
     $('libraryStatus').textContent='Start start-bridge.bat on this PC.';
     pill('Bridge offline','warn');
   }
-
-  resetCL();
 });
+\n});
