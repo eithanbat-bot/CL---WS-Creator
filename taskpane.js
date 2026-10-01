@@ -27,7 +27,7 @@ async function bridge(path,opts){
     return d;
   }catch(e){
     if(e&&e.name==='AbortError')throw new Error('The local bridge did not finish within '+Math.round(timeout/1000)+' seconds. The requested operation is still running on the local PC.');
-    if(e&&e.message==='Failed to fetch')throw new Error('Cannot connect to the local CL-WS bridge at '+url+'. Make sure start-bridge.bat is running on this PC.');
+    if(e&&e.message==='Failed to fetch')throw new Error('Cannot connect to the local CL-WS bridge at '+url+'. Make sure Start Bridge Fixed.bat is running on this PC.');
     throw e;
   }finally{
     if(timer)window.clearTimeout(timer);
@@ -96,7 +96,7 @@ async function writeReportSheets(result,job,selectedSheetNames){
     ['Ambiguous matches',review.filter(function(x){return String(x.statusLabel||'').indexOf('AMBIGUOUS')===0}).length],
     ['',''],
     ['ACTION / HAND-OFF','DETAIL'],
-    ['Geometry search','Recursive .PRS search under the PRS root and recursive .DXF search under the DXF root, including all subfolders'],
+    ['Geometry search','Recursive .PRS search under the PRS root and indexed .DXF search under the DXF root, including all subfolders'],
     ['SigmaNEST WS',result.wsPath||'Not created — review items remain'],
     ['Staging folder',result.outputDir||''],
     ['Part review sheet','See "Part Review" worksheet for every item requiring confirmation']
@@ -116,48 +116,33 @@ async function writeReportSheets(result,job,selectedSheetNames){
   var summaryName='CL WS Summary';
   var reviewName='Part Review';
 
-  // Write values in a deliberately simple Excel transaction. Styling is separate
-  // so an Excel formatting/API quirk cannot prevent the report sheets from being created.
+  // Recreate only the two report sheets. This avoids UsedRange/clear/merge
+  // edge cases in different Excel desktop builds.
   await Excel.run(async function(context){
     var wb=context.workbook;
-    var summarySheet=wb.worksheets.getItemOrNullObject(summaryName);
-    var reviewSheet=wb.worksheets.getItemOrNullObject(reviewName);
+    var oldSummary=wb.worksheets.getItemOrNullObject(summaryName);
+    var oldReview=wb.worksheets.getItemOrNullObject(reviewName);
     await context.sync();
 
-    if(summarySheet.isNullObject)summarySheet=wb.worksheets.add(summaryName);
-    if(reviewSheet.isNullObject)reviewSheet=wb.worksheets.add(reviewName);
+    if(!oldSummary.isNullObject)oldSummary.delete();
+    if(!oldReview.isNullObject)oldReview.delete();
     await context.sync();
 
-    var oldSummary=summarySheet.getUsedRangeOrNullObject();
-    var oldReview=reviewSheet.getUsedRangeOrNullObject();
-    await context.sync();
-    if(!oldSummary.isNullObject)oldSummary.clear('All');
-    if(!oldReview.isNullObject)oldReview.clear('All');
+    var summarySheet=wb.worksheets.add(summaryName);
+    var reviewSheet=wb.worksheets.add(reviewName);
     await context.sync();
 
     summarySheet.getRangeByIndexes(0,0,summaryData.length,2).values=rectangular(summaryData,2);
     var rm=[reviewHeaders].concat(reviewRows);
     reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length).values=rectangular(rm,reviewHeaders.length);
     await context.sync();
-  });
 
-  // Formatting is best-effort only. The data above is already safely written.
-  try{
-    await Excel.run(async function(context){
-      var wb=context.workbook;
-      var summarySheet=wb.worksheets.getItem(summaryName);
-      var reviewSheet=wb.worksheets.getItem(reviewName);
-      summarySheet.getRange('A1:B1').format.font.bold=true;
-      summarySheet.getRange('A8:B8').format.font.bold=true;
-      summarySheet.getRange('A23:B23').format.font.bold=true;
-      reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.bold=true;
-      summarySheet.getUsedRange().format.wrapText=true;
-      reviewSheet.getUsedRange().format.wrapText=true;
-      await context.sync();
-    });
-  }catch(e){
-    // Values are the important part; report creation has already succeeded.
-  }
+    summarySheet.getRange('A1:B1').format.font.bold=true;
+    summarySheet.getRange('A8:B8').format.font.bold=true;
+    summarySheet.getRange('A23:B23').format.font.bold=true;
+    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.bold=true;
+    await context.sync();
+  });
 }
 
 
@@ -398,7 +383,6 @@ async function build(){
     var parts=await readCL();
     var selectedNames=selectedSheets().map(function(s){return s.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
-    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
     var job=$('jobName').value.trim()||'CL_JOB';
     var r=await bridge('/api/build-job',{
       method:'POST',
@@ -438,7 +422,7 @@ async function checkBridge(){
     return true;
   }catch(e){
     pill('Bridge not running','bad');
-    $('buildStatus').textContent='The local bridge is not running. Start start-bridge.bat on this PC, then click Retry. ('+e.message+')';
+    $('buildStatus').textContent='The local bridge is not running. Start Start Bridge Fixed.bat on this PC, then click Retry. ('+e.message+')';
     return false;
   }
 }
