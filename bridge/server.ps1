@@ -131,12 +131,23 @@ function Thickness-Number([string]$s){
   if($m.Success){[double]$m.Groups[1].Value}else{[double]::NaN}
 }
 function Material-Equal([string]$a,[string]$b){
-  $A=(Normalize-Material -s $a).ToUpperInvariant();$B=(Normalize-Material -s $b).ToUpperInvariant()
+  $A=(Normalize-Material -s $a).ToUpperInvariant()
+  $B=(Normalize-Material -s $b).ToUpperInvariant()
   if(-not $A -or -not $B -or $A -eq $B){return $true}
-  if($A -match '4\s*MM\s*ARMOX' -and $B -match 'RAMOR\s*500'){return $true}
-  if($B -match '4\s*MM\s*ARMOX' -and $A -match 'RAMOR\s*500'){return $true}
-  return ($A.Contains($B) -or $B.Contains($A))
+
+  # Required job rule: 4 mm Armox is treated as Ramor 500.
+  $A4Armox=($A -match 'ARMOX' -and $A -match '4\s*MM')
+  $B4Armox=($B -match 'ARMOX' -and $B -match '4\s*MM')
+  $ARamor500=($A -match 'RAMOR' -and $A -match '500')
+  $BRamor500=($B -match 'RAMOR' -and $B -match '500')
+  if(($A4Armox -and $BRamor500) -or ($B4Armox -and $ARamor500)){return $true}
+
+  $ANoSize=($A -replace '\b\d+(?:\.\d+)?\s*MM\b','' -replace '\s+(SHEET|PLATE)\b','').Trim()
+  $BNoSize=($B -replace '\b\d+(?:\.\d+)?\s*MM\b','' -replace '\s+(SHEET|PLATE)\b','').Trim()
+  if($ANoSize -eq $BNoSize){return $true}
+  return ($ANoSize.Contains($BNoSize) -or $BNoSize.Contains($ANoSize))
 }
+
 function Sigma-Material([string]$cl,[string]$lib){
   $s=Normalize-Material -s ([string]$(if($lib){$lib}else{$cl}))
   $s=$s -replace '^\d+(?:\.\d+)?\s*mm\s*',''
@@ -302,39 +313,54 @@ function Handle-Request($req){
       $mok=$true
       $tok=$true
       if($matKnown -and $clMatKnown){$mok=Material-Equal -a $clMat -b $libMat}
-      if($thkKnown -and $clThkKnown){
-        $tok=(Thickness-Number -s $clThk) -eq (Thickness-Number -s $libThk)
-      }
+      if($thkKnown -and $clThkKnown){$tok=(Thickness-Number -s $clThk) -eq (Thickness-Number -s $libThk)}
       $variation=([string]$f.matchType -eq 'VARIATION')
 
-      # The PRS filename identifies the geometry. Material/thickness in the
-      # CL are the requested job settings and are applied to the SigmaNEST
-      # part during creation. PRS metadata is used to catch a known mismatch,
-      # but an unreadable/undocumented metadata field must not block a valid
-      # exact geometry match.
-      if($variation){
+      $reviewReason=''
+      if($variation -and $clMatKnown -and $clThkKnown -and $matKnown -and $thkKnown -and $mok -and $tok){
+        $status='READY'
+        $label='FOUND - VARIATION'
+      }elseif($variation){
         $status='REVIEW'
         $label='VARIATION - REVIEW'
+        $reviewReason='Variation match needs confirmation'
       }elseif(-not $clMatKnown -or -not $clThkKnown){
         $status='REVIEW'
         $label='CL MATERIAL/THICKNESS MISSING'
+        $reviewReason='CL material or thickness is missing'
       }elseif($matKnown -and -not $mok){
         $status='REVIEW'
         $label='MATERIAL MISMATCH'
+        $reviewReason='PRS material conflicts with CL material'
       }elseif($thkKnown -and -not $tok){
         $status='REVIEW'
         $label='THICKNESS MISMATCH'
+        $reviewReason='PRS thickness conflicts with CL thickness'
       }else{
         $status='READY'
         $label=if($matKnown -and $thkKnown){'FOUND'}else{'FOUND - USING CL DATA'}
       }
-      Set-Prop $p 'status' $status | Out-Null;Set-Prop $p 'statusLabel' $label | Out-Null
-      Set-Prop $p 'file' $f.file | Out-Null;Set-Prop $p 'prs' $f.file | Out-Null;Set-Prop $p 'sourceDxf' $f.sourceDxf | Out-Null;Set-Prop $p 'matchType' $f.matchType | Out-Null;Set-Prop $p 'libraryMaterial' $libMat | Out-Null;Set-Prop $p 'libraryThickness' $libThk | Out-Null
+      Set-Prop -obj $p -name 'status' -value $status | Out-Null
+      Set-Prop -obj $p -name 'statusLabel' -value $label | Out-Null
+      Set-Prop -obj $p -name 'reviewReason' -value $reviewReason | Out-Null
+      Set-Prop -obj $p -name 'file' -value $f.file | Out-Null
+      Set-Prop -obj $p -name 'prs' -value $f.file | Out-Null
+      Set-Prop -obj $p -name 'sourceDxf' -value $f.sourceDxf | Out-Null
+      Set-Prop -obj $p -name 'matchType' -value $f.matchType | Out-Null
+      Set-Prop -obj $p -name 'libraryMaterial' -value $libMat | Out-Null
+      Set-Prop -obj $p -name 'libraryThickness' -value $libThk | Out-Null
       $parts+=$p
     }
     $review=@($parts|Where-Object {$_.status -ne 'READY'})
+    $reviewBreakdown=[ordered]@{}
+    foreach($rp in $review){
+      $reason=[string]$rp.statusLabel
+      if([string]::IsNullOrWhiteSpace($reason)){$reason='REVIEW'}
+      if(-not $reviewBreakdown.Contains($reason)){$reviewBreakdown[$reason]=0}
+      $reviewBreakdown[$reason]=[int]$reviewBreakdown[$reason]+1
+    }
     $staging=Write-Job -root $root -name $name -parts $parts
-    if($review.Count -gt 0){return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message="Job staged, but $($review.Count) part(s) require review before SigmaNEST creation.";parts=$parts;reviewCount=$review.Count;sigmaNestCreated=$false}}}
+    if($review.Count -gt 0){return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message="Job staged, but $($review.Count) part(s) require review before SigmaNEST creation.";parts=$parts;reviewCount=$review.Count;reviewBreakdown=$reviewBreakdown;sigmaNestCreated=$false}}}
     $reqFile=Join-Path $ROOT ('_psrequest-'+[Diagnostics.Process]::GetCurrentProcess().Id+'-'+[DateTime]::Now.Ticks+'.json')
     $request=[pscustomobject]@{jobName=$name;libraryRoot=$root;wsDirectory=[string]$b.wsDirectory;parts=@($parts|ForEach-Object{[pscustomobject]@{part=$_.part;qty=$_.qty;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});taskSheet=$_.sheet;prsPath=$_.file;sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial));thicknessMm=(Thickness-Number -s ([string]$_.thickness))}})}
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
