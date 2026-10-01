@@ -19,6 +19,9 @@ if not exist "%BRIDGE%" mkdir "%BRIDGE%" >nul 2>&1
 if exist "%TMP%" rmdir /s /q "%TMP%" >nul 2>&1
 mkdir "%TMP%" >nul 2>&1
 
+echo [CL-WS] Stopping any existing Creator bridge using this install...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $target=[IO.Path]::GetFullPath('%BRIDGE%\server.ps1'); Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.ProcessId -ne $PID -and [regex]::IsMatch([string]$_.CommandLine,[regex]::Escape($target)) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Start-Sleep -Milliseconds 500"
+echo.
 echo [CL-WS] Downloading server.ps1...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing -TimeoutSec 90 -Uri '%RAW%/server.ps1' -OutFile '%TMP%\server.ps1'; $t=Get-Content -Raw '%TMP%\server.ps1'; if($t -notmatch '\$BRIDGE_VERSION\s*=\s*''2\.3\.0'''){throw 'Downloaded server.ps1 is not bridge version 2.3.0.'}; $x=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile('%TMP%\server.ps1',[ref]$x,[ref]$e)|Out-Null;if($e.Count -gt 0){throw 'Downloaded server.ps1 failed PowerShell syntax validation.'}"
 if errorlevel 1 goto FAIL
