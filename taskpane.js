@@ -48,8 +48,8 @@ function resetCL(){
   $('clearCL').disabled=true;
   setBuildEnabled(false);
   clearResults();
-  pill('Connected','ok');
 }
+
 
 function renderSheets(){
   var box=$('sheetList');
@@ -222,6 +222,8 @@ Office.onReady(async function(info){
 
   $('libraryPath').value=localStorage.getItem('clwsc_libraryRoot')||'S:\\SNDataX1\\PARTS';
   $('libraryPath').onchange=function(){localStorage.setItem('clwsc_libraryRoot',$('libraryPath').value.trim())};
+
+  resetCL();
 
   try{
     var h=await bridge('/api/health');
