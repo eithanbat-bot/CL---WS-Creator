@@ -274,7 +274,7 @@ Office.onReady(async function(info){
 
   try{
     var h=await bridge('/api/health');
-    $('libraryStatus').textContent='Bridge connected. Library: '+h.libraryRoot;
+    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). Library: '+h.libraryRoot;
     pill('Connected','ok');
   }catch(e){
     $('libraryStatus').textContent='Start start-bridge.bat on this PC.';
