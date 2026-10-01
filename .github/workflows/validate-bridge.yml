@@ -123,7 +123,7 @@ jobs:
           if ($bat -notmatch 'raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge') {
             throw 'Launcher is not configured to download the current Creator bridge from GitHub.'
           }
-          if ($bat -notmatch '2\.3\.0') {
+          if ($bat -notmatch '2\.3\.1') {
             throw 'Launcher does not verify/install bridge version 2.3.1.'
           }
           if ($taskpane -notmatch 'Start Bridge Fixed\.bat') {
