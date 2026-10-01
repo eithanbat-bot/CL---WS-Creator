@@ -48,6 +48,136 @@ function clearResults(){
   $('totalQty').textContent='0';
 }
 
+function sumQty(parts){
+  return (parts||[]).reduce(function(a,x){return a+(Number(x.qty)||0)},0);
+}
+
+function statusCount(parts, label){
+  return (parts||[]).filter(function(x){return String(x.statusLabel||'')===label}).length;
+}
+
+async function writeReportSheets(result,job,selectedSheetNames){
+  var parts=result.parts||[];
+  var review=parts.filter(function(x){return x.status!=='READY'});
+  var ready=parts.filter(function(x){return x.status==='READY'});
+  var prs=parts.filter(function(x){return String(x.sourceType||'')==='PRS'});
+  var dxf=parts.filter(function(x){return String(x.sourceType||'')==='DXF'});
+  var missing=parts.filter(function(x){return x.status==='MISSING'});
+  var now=new Date().toLocaleString();
+
+  function rectangular(rows,cols){
+    return rows.map(function(r){
+      var a=r.slice(0,cols);
+      while(a.length<cols)a.push('');
+      return a;
+    });
+  }
+
+  var summary=[
+    ['CL - WS Creator',''],
+    ['Job',job||''],
+    ['Generated',now],
+    ['CL workbook',clFile?clFile.name:''],
+    ['Selected CL sheets',(selectedSheetNames||[]).join(', ')],
+    ['Geometry library root',$('libraryPath').value.trim()],
+    ['',''],
+    ['RESULT','VALUE'],
+    ['Consolidated CL lines',parts.length],
+    ['Total required quantity',sumQty(parts)],
+    ['Ready for SigmaNEST',ready.length],
+    ['Review required',review.length],
+    ['PRS geometry matches',prs.length],
+    ['DXF geometry matches',dxf.length],
+    ['Missing geometry',missing.length],
+    ['Material mismatches',statusCount(parts,'MATERIAL MISMATCH')],
+    ['Thickness mismatches',statusCount(parts,'THICKNESS MISMATCH')],
+    ['Variation review',review.filter(function(x){return String(x.statusLabel||'').indexOf('VARIATION')>=0}).length],
+    ['Ambiguous matches',review.filter(function(x){return String(x.statusLabel||'').indexOf('AMBIGUOUS')===0}).length],
+    ['',''],
+    ['ACTION / HAND-OFF','DETAIL'],
+    ['Geometry search','Recursive .PRS + .DXF search through the configured server folder and all subfolders'],
+    ['SigmaNEST WS',result.wsPath||'Not created — review items remain'],
+    ['Staging folder',result.outputDir||''],
+    ['Part review sheet','See "Part Review" worksheet for every item requiring confirmation']
+  ];
+
+  var reviewHeaders=['Part','Qty','Material','Thickness','Status','Reason','Match Type','Source Type','Source File','Source Path','PRS Material','PRS Thickness','CL Sheets'];
+  var reviewRows=review.map(function(x){
+    return [
+      x.part,x.qty,x.material,x.thickness,x.statusLabel||x.status,x.reviewReason||'',
+      x.matchType||'',x.sourceType||'',x.sourcePath?String(x.sourcePath).split(/[/\\\\]/).pop():'',
+      x.sourcePath||'',x.libraryMaterial||'',x.libraryThickness||'',
+      Array.isArray(x.sourceSheets)?x.sourceSheets.join(', '):''
+    ];
+  });
+  if(!reviewRows.length)reviewRows=[['No parts require review.','','','','','','','','','','','','']];
+
+  var summaryName='CL WS Summary';
+  var reviewName='Part Review';
+
+  await Excel.run(async function(context){
+    var wb=context.workbook;
+    var summary=wb.worksheets.getItemOrNullObject(summaryName);
+    var reviewSheet=wb.worksheets.getItemOrNullObject(reviewName);
+    await context.sync();
+
+    if(summary.isNullObject)summary=wb.worksheets.add(summaryName);
+    if(reviewSheet.isNullObject)reviewSheet=wb.worksheets.add(reviewName);
+    await context.sync();
+
+    var oldSummary=summary.getUsedRangeOrNullObject();
+    var oldReview=reviewSheet.getUsedRangeOrNullObject();
+    await context.sync();
+    if(!oldSummary.isNullObject)oldSummary.clear('All');
+    if(!oldReview.isNullObject)oldReview.clear('All');
+
+    var sm=rectangular(summary,2);
+    var sr=summary.getRangeByIndexes(0,0,sm.length,2);
+    sr.values=sm;
+    sr.format.font.name='Segoe UI';
+    sr.format.font.size=10;
+
+    var title=summary.getRange('A1:B1');
+    title.merge();
+    title.format.font.size=18;
+    title.format.font.bold=true;
+
+    var summaryHeaderRow=summary.getRange('A8:B8');
+    summaryHeaderRow.format.font.bold=true;
+    summaryHeaderRow.format.fill.color='#0B2942';
+    summaryHeaderRow.format.font.color='#FFFFFF';
+
+    var actionHeaderRow=summary.getRange('A22:B22');
+    actionHeaderRow.format.font.bold=true;
+    actionHeaderRow.format.fill.color='#E7EEF5';
+
+    summary.getRange('A1:B'+sm.length).format.wrapText=true;
+    summary.getRange('A:A').format.columnWidth=210;
+    summary.getRange('B:B').format.columnWidth=420;
+
+    var rm=[reviewHeaders].concat(reviewRows);
+    var rr=reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length);
+    rr.values=rectangular(rm,reviewHeaders.length);
+    rr.format.font.name='Segoe UI';
+    rr.format.font.size=10;
+    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.bold=true;
+    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.fill.color='#0B2942';
+    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.color='#FFFFFF';
+    reviewSheet.getUsedRange().format.wrapText=true;
+
+    var widths=[150,70,130,80,150,260,100,90,170,360,130,100,180];
+    widths.forEach(function(w,i){
+      reviewSheet.getRangeByIndexes(0,i,Math.min(rm.length,1),1).format.columnWidth=w;
+    });
+    try{reviewSheet.freezePanes.freezeRows(1)}catch(e){}
+    try{summary.freezePanes.freezeRows(8)}catch(e){}
+
+    await context.sync();
+  });
+}
+
+
+
 function resetCL(){
   clFile=null;
   clWorkbook=null;
@@ -174,7 +304,7 @@ function showParts(parts,statusMode){
     var tr=document.createElement('tr');
     var st=statusMode==='preview'?'—':(p.statusLabel||p.status||'');
     var cls=p.status==='READY'?'okText':(p.status==='REVIEW'?'warnText':'badText');
-    tr.innerHTML='<td>'+esc(p.part)+'</td><td>'+p.qty+'</td><td>'+esc(p.material)+'</td><td>'+esc(p.thickness)+'</td><td class="'+cls+'">'+esc(st)+'</td>';
+    tr.innerHTML='<td>'+esc(p.part)+'</td><td>'+p.qty+'</td><td>'+esc(p.material)+'</td><td>'+esc(p.thickness)+'</td><td>'+esc(p.sourceType||'')+'</td><td>'+esc(p.matchType||'')+'</td><td class="'+cls+'">'+esc(st)+'</td>';
     body.appendChild(tr);
   });
 }
@@ -206,14 +336,14 @@ async function scan(){
     var scanErrors=(r.scanErrors||[]).length, inspectErrors=(r.inspectErrors||[]).length;
     var elapsed=Math.round((Date.now()-started)/1000);
     if(!r.count && !r.discoveredFiles){
-      $('libraryStatus').textContent='No .PRS files were found in the selected folder. Scan completed in '+elapsed+'s.';
+      $('libraryStatus').textContent='No .PRS or .DXF geometry files were found in the selected folder tree. Scan completed in '+elapsed+'s.';
       pill('No PRS files','warn');
     }else if(scanErrors||inspectErrors){
       var first=(r.scanErrors&&r.scanErrors[0])?(r.scanErrors[0].path+': '+r.scanErrors[0].error):(r.inspectErrors[0]?r.inspectErrors[0].path+': '+r.inspectErrors[0].error:'Unknown scan issue');
-      $('libraryStatus').textContent=r.count+' .PRS files indexed; '+(scanErrors+inspectErrors)+' file/folder read issue(s). First: '+first+' ('+elapsed+'s)';
+      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(r.dxfCount||0)+' .DXF files indexed; '+(scanErrors+inspectErrors)+' issue(s). First: '+first+' ('+elapsed+'s)';
       pill('Library partial','warn');
     }else{
-      $('libraryStatus').textContent=r.count+' .PRS files indexed in '+elapsed+'s.';
+      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(r.dxfCount||0)+' .DXF files indexed recursively in '+elapsed+'s.';
       pill('Library ready','ok');
     }
   }catch(e){
@@ -242,6 +372,7 @@ async function build(){
       timeoutMs:300000
     });
     showParts(r.parts,'built');
+    try{await writeReportSheets(r,job,selectedSheets().map(function(x){return x.name}))}catch(reportErr){$('buildStatus').textContent='Job processed, but Excel report sheets could not be updated: '+reportErr.message;}
     $('geometryFound').textContent=r.parts.filter(function(x){return x.status==='READY'}).length;
     $('geometryMissing').textContent=r.parts.filter(function(x){return x.status!=='READY'}).length;
     if(r.wsPath){
@@ -280,7 +411,7 @@ Office.onReady(async function(info){
 
   try{
     var h=await bridge('/api/health');
-    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). Library: '+h.libraryRoot;
+    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). Library: '+h.libraryRoot+(h.prsCount!=null?' | PRS '+h.prsCount+' | DXF '+(h.dxfCount||0):'');
     pill('Connected','ok');
   }catch(e){
     $('libraryStatus').textContent='Start start-bridge.bat on this PC.';
