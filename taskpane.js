@@ -183,8 +183,17 @@ async function scan(){
     var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     $('libraryPath').value=root;
     var r=await bridge('/api/scan',{method:'POST',body:JSON.stringify({root:root})});
-    $('libraryStatus').textContent=r.count+' .PRS files indexed.'+(r.discoveredFiles&&r.discoveredFiles!==r.count?' '+r.discoveredFiles+' .PRS files discovered.':'');
-    pill((r.scanErrors&&r.scanErrors.length)||(r.inspectErrors&&r.inspectErrors.length)?'Library partial':'Library ready',(r.scanErrors&&r.scanErrors.length)||(r.inspectErrors&&r.inspectErrors.length)?'warn':'ok');
+    var scanErrors=(r.scanErrors||[]).length, inspectErrors=(r.inspectErrors||[]).length;
+    if(!r.count && !r.discoveredFiles){
+      $('libraryStatus').textContent='No .PRS files were found in the selected folder.';
+      pill('No PRS files','warn');
+    }else if(scanErrors||inspectErrors){
+      $('libraryStatus').textContent=r.count+' .PRS files indexed; '+(scanErrors+inspectErrors)+' file/folder read issue(s). First: '+(r.scanErrors&&r.scanErrors[0]?r.scanErrors[0].path+': '+r.scanErrors[0].error:r.inspectErrors[0].path+': '+r.inspectErrors[0].error);
+      pill('Library partial','warn');
+    }else{
+      $('libraryStatus').textContent=r.count+' .PRS files indexed.';
+      pill('Library ready','ok');
+    }
   }catch(e){
     $('libraryStatus').textContent=e.message;
     pill('Bridge offline','bad');
