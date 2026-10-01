@@ -351,12 +351,18 @@ function Handle-Request($req){
     $b=$req.Body|ConvertFrom-Json
     $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
     $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
-    if(-not $script:INDEX -or $script:INDEX.Count -eq 0 -or [string]$CFG.libraryRoot -ne [string]$prsRoot -or [string]$CFG.dxfRoot -ne [string]$dxfRoot){
+    $dxfStatus=Get-DxfStatus
+    if([string]$dxfStatus.root -ne [string]$dxfRoot -or [string]$dxfStatus.state -ne 'COMPLETE'){
       $dxfStatus=Start-DxfScan -root $dxfRoot
+    }
+    if(
+      -not $script:INDEX -or
+      $script:INDEX.Count -eq 0 -or
+      [string]$CFG.libraryRoot -ne [string]$prsRoot -or
+      [string]$CFG.dxfRoot -ne [string]$dxfRoot -or
+      ([string]$dxfStatus.state -eq 'COMPLETE' -and [string]$CFG.dxfIndexState -ne 'COMPLETE')
+    ){
       Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot|Out-Null
-    }else{
-      $dxfStatus=Get-DxfStatus
-      if([string]$dxfStatus.root -ne [string]$dxfRoot -or [string]$dxfStatus.state -ne 'COMPLETE'){$dxfStatus=Start-DxfScan -root $dxfRoot}
     }
     $root=$prsRoot
     $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
