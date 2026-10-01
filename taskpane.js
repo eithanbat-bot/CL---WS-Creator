@@ -73,7 +73,7 @@ async function writeReportSheets(result,job,selectedSheetNames){
     });
   }
 
-  var summary=[
+  var summaryData=[
     ['CL - WS Creator',''],
     ['Job',job||''],
     ['Generated',now],
@@ -118,43 +118,43 @@ async function writeReportSheets(result,job,selectedSheetNames){
 
   await Excel.run(async function(context){
     var wb=context.workbook;
-    var summary=wb.worksheets.getItemOrNullObject(summaryName);
+    var summarySheet=wb.worksheets.getItemOrNullObject(summaryName);
     var reviewSheet=wb.worksheets.getItemOrNullObject(reviewName);
     await context.sync();
 
-    if(summary.isNullObject)summary=wb.worksheets.add(summaryName);
+    if(summarySheet.isNullObject)summarySheet=wb.worksheets.add(summaryName);
     if(reviewSheet.isNullObject)reviewSheet=wb.worksheets.add(reviewName);
     await context.sync();
 
-    var oldSummary=summary.getUsedRangeOrNullObject();
+    var oldSummary=summarySheet.getUsedRangeOrNullObject();
     var oldReview=reviewSheet.getUsedRangeOrNullObject();
     await context.sync();
     if(!oldSummary.isNullObject)oldSummary.clear('All');
     if(!oldReview.isNullObject)oldReview.clear('All');
 
-    var sm=rectangular(summary,2);
-    var sr=summary.getRangeByIndexes(0,0,sm.length,2);
+    var sm=rectangular(summaryData,2);
+    var sr=summarySheet.getRangeByIndexes(0,0,sm.length,2);
     sr.values=sm;
     sr.format.font.name='Segoe UI';
     sr.format.font.size=10;
 
-    var title=summary.getRange('A1:B1');
+    var title=summarySheet.getRange('A1:B1');
     title.merge();
     title.format.font.size=18;
     title.format.font.bold=true;
 
-    var summaryHeaderRow=summary.getRange('A8:B8');
+    var summaryHeaderRow=summarySheet.getRange('A8:B8');
     summaryHeaderRow.format.font.bold=true;
     summaryHeaderRow.format.fill.color='#0B2942';
     summaryHeaderRow.format.font.color='#FFFFFF';
 
-    var actionHeaderRow=summary.getRange('A22:B22');
+    var actionHeaderRow=summarySheet.getRange('A23:B23');
     actionHeaderRow.format.font.bold=true;
     actionHeaderRow.format.fill.color='#E7EEF5';
 
-    summary.getRange('A1:B'+sm.length).format.wrapText=true;
-    summary.getRange('A1:A'+sm.length).format.columnWidth=210;
-    summary.getRange('B1:B'+sm.length).format.columnWidth=420;
+    summarySheet.getRange('A1:B'+sm.length).format.wrapText=true;
+    summarySheet.getRange('A1:A'+sm.length).format.columnWidth=210;
+    summarySheet.getRange('B1:B'+sm.length).format.columnWidth=420;
 
     var rm=[reviewHeaders].concat(reviewRows);
     var rr=reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length);
@@ -171,7 +171,7 @@ async function writeReportSheets(result,job,selectedSheetNames){
       reviewSheet.getRangeByIndexes(0,i,Math.min(rm.length,1),1).format.columnWidth=w;
     });
     try{reviewSheet.freezePanes.freezeRows(1)}catch(e){}
-    try{summary.freezePanes.freezeRows(8)}catch(e){}
+    try{summarySheet.freezePanes.freezeRows(8)}catch(e){}
 
     await context.sync();
   });
