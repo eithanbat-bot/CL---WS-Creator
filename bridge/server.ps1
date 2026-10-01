@@ -120,7 +120,7 @@ function Normalize-Material([string]$s){
   ($s -replace '\s+',' ').Trim()
 }
 function Thickness-Number([string]$s){
-  $m=[regex]::Match([string]$s,'(\d+(?:\.\d+)?)\s*mm','IgnoreCase')
+  $m=[regex]::Match([string]$s,'(\d+(?:\.\d+)?)\s*mm',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
   if($m.Success){[double]$m.Groups[1].Value}else{[double]::NaN}
 }
 function Material-Equal([string]$a,[string]$b){
@@ -229,7 +229,7 @@ function Handle-Request($req){
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
 }
 
-$listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,$PORT)
+$listener = New-Object -TypeName Net.Sockets.TcpListener -ArgumentList ([Net.IPAddress]::Loopback,$PORT)
 $listener.Start()
 Write-Host "CL-WS-Creator PowerShell bridge listening on http://127.0.0.1:$PORT"
 Write-Host "PRS library default: $DEFAULT_LIBRARY"
