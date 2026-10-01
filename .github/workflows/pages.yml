@@ -22,6 +22,24 @@ jobs:
       - name: Stamp build id for cache-busting
         shell: bash
         run: sed -i "s/__BUILD__/${GITHUB_SHA::8}/g" taskpane.html
+      - name: Package bridge
+        shell: bash
+        run: |
+          rm -rf bridge-package
+          mkdir -p bridge-package/bridge
+          cp "Start Bridge Fixed.bat" bridge-package/
+          cp "manifest.xml" bridge-package/
+          cp bridge/server.ps1 bridge-package/bridge/
+          cp bridge/dxf-indexer.ps1 bridge-package/bridge/
+          cp bridge/create-sigmanest-ws.ps1 bridge-package/bridge/
+          cp bridge/update-and-start.ps1 bridge-package/bridge/
+          (cd bridge-package && zip -r "../CL-WS-Creator-Bridge-${GITHUB_SHA::8}.zip" .)
+      - name: Upload bridge package
+        uses: actions/upload-artifact@v4
+        with:
+          name: CL-WS-Creator-Bridge-${{ github.sha }}
+          path: CL-WS-Creator-Bridge-${{ github.sha }}.zip
+          retention-days: 14
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
