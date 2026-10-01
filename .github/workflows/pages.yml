@@ -21,7 +21,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Stamp build id for cache-busting
         shell: bash
-        run: sed -i "s/__BUILD__/${GITHUB_SHA::8}/g" taskpane.html
+        run: |
+          sed -i "s/__BUILD__/${GITHUB_SHA::8}/g" taskpane.html
+          sed -i "s/__BUILD__/${GITHUB_SHA::8}/g" manifest.xml
       - name: Package bridge
         shell: bash
         run: |
