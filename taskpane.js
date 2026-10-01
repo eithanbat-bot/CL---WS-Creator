@@ -234,4 +234,3 @@ Office.onReady(async function(info){
     pill('Bridge offline','warn');
   }
 });
-\n});
