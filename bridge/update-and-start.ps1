@@ -79,20 +79,6 @@ function Download-File($url,$dest) {
   }
 }
 
-function Update-LocalManifest(){
-  $manifest=Join-Path $Root 'manifest.xml'
-  if(-not(Test-Path -LiteralPath $manifest)){return}
-  $tmp=Join-Path $tmpRoot 'manifest.xml'
-  Download-File ($RawBase+'manifest.xml') $tmp
-  try{
-    [xml](Get-Content -Raw -LiteralPath $tmp)|Out-Null
-  }catch{
-    throw 'Downloaded manifest.xml failed XML validation.'
-  }
-  Copy-Item -LiteralPath $tmp -Destination $manifest -Force
-  Say 'Updated local manifest.xml.' 'Green'
-}
-
 function Stop-OlderBridges(){
   try{
     $serverPattern=[regex]::Escape($Server)
@@ -167,21 +153,9 @@ try{
         Copy-Item -LiteralPath (Join-Path $tmp $rel) -Destination $local -Force
       }
       $updated=$true
-      Say ("Updated: "+($changed -join ', ')) 'Green'
-      try{
-        $manifest=Join-Path $Root 'manifest.xml'
-        if(Test-Path -LiteralPath $manifest){
-          $manifestTmp=Join-Path $tmp 'manifest.xml'
-          Download-File ($RawBase+'manifest.xml') $manifestTmp
-          [xml](Get-Content -Raw -LiteralPath $manifestTmp)|Out-Null
-          Copy-Item -LiteralPath $manifestTmp -Destination $manifest -Force
-          Say 'Updated local manifest.xml.' 'Green'
-        }
-      }catch{
-        throw ('Local manifest update failed: '+$_.Exception.Message)
-      }
+      Say ("Updated bridge files: "+($changed -join ', ')) 'Green'
     }catch{
-      Say 'Update failed during file replacement. Restoring the previous bridge files...' 'Red'
+      Say 'Bridge update failed during file replacement. Restoring previous files...' 'Red'
       foreach($rel in $changed){
         $backup=Join-Path $BackupDir $rel
         $local=Join-Path $BridgeDir $rel
@@ -189,6 +163,26 @@ try{
       }
       throw
     }
+  }else{
+    Say 'Bridge is already up to date.' 'Green'
+  }
+
+  # Synchronize the trusted-folder manifest independently from bridge files.
+  $localManifest=Join-Path $Root 'manifest.xml'
+  if(Test-Path -LiteralPath $localManifest){
+    $remoteManifest=Join-Path $tmp 'manifest.xml'
+    Say 'Checking local manifest.xml...'
+    Download-File ($RawBase+'manifest.xml') $remoteManifest
+    try{ [xml](Get-Content -Raw -LiteralPath $remoteManifest)|Out-Null }
+    catch{ throw 'Downloaded manifest.xml failed XML validation.' }
+
+    if((Get-Hash $remoteManifest) -ne (Get-Hash $localManifest)){
+      Copy-Item -LiteralPath $remoteManifest -Destination $localManifest -Force
+      Say 'Updated local manifest.xml.' 'Green'
+    }else{
+      Say 'Local manifest.xml is already current.' 'Green'
+    }
+  }
   }else{
     Say 'Bridge is already up to date.' 'Green'
   }
