@@ -1,0 +1,68 @@
+name: Validate bridge scripts
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  validate-powershell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse bridge scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            'bridge/server.ps1',
+            'bridge/create-sigmanest-ws.ps1'
+          )
+
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+
+            if ($errors.Count -gt 0) {
+              Write-Host "$file has PowerShell parse errors:" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+              exit 1
+            }
+
+            Write-Host "$file syntax: OK" -ForegroundColor Green
+          }
+
+      - name: Check known build-path hazards
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $server = Get-Content -Raw -LiteralPath 'bridge/server.ps1'
+          $creator = Get-Content -Raw -LiteralPath 'bridge/create-sigmanest-ws.ps1'
+          $bat = Get-Content -Raw -LiteralPath 'start-bridge.bat'
+
+          if ($server -match "Join-Path\s+\$out\s+'parts'\s+\(\[IO\.Path\]::GetFileName\(\$p\.file\)\)") {
+            throw 'Unsafe three-argument Join-Path remains in Write-Job.'
+          }
+
+          if ($creator -match '(?m)^\s*.*AddfromLibrary\s*\(' -and $creator -notmatch '(?m)^\s*#') {
+            throw 'Executable AddfromLibrary call remains in the SigmaNEST creator.'
+          }
+
+          foreach ($needle in @(
+            "%~dp0bridge\server.ps1",
+            "%~dp0bridge\create-sigmanest-ws.ps1"
+          )) {
+            if ($bat -notlike "*$needle*") {
+              throw "start-bridge.bat is missing expected path: $needle"
+            }
+          }
+
+          if ($bat -notlike '*Parser]::ParseFile*') {
+            throw 'start-bridge.bat is missing the local syntax preflight.'
+          }
+
+          Write-Host 'Build-path hazard checks: OK' -ForegroundColor Green
