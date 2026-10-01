@@ -169,6 +169,14 @@ function Scan-Library([string]$root) {
   })
 
   $script:INDEX=$items
+  $script:BYNAME=@{}
+  $script:BYVAR=@{}
+  foreach($item in $items){
+    $nk=Normalize $item.partName
+    if($nk){ if(-not $script:BYNAME.ContainsKey($nk)){$script:BYNAME[$nk]=@()}; $script:BYNAME[$nk]+=$item }
+    $vk=VariationKey $item.partName
+    if($vk){ if(-not $script:BYVAR.ContainsKey($vk)){$script:BYVAR[$vk]=@()}; $script:BYVAR[$vk]+=$item }
+  }
   $CFG.libraryRoot=$root
   $CFG.lastScan=(Get-Date).ToUniversalTime().ToString('o')
   $CFG.count=$items.Count
@@ -203,13 +211,16 @@ function Ensure-Metadata($item) {
 function Find-Part([string]$part){
   $n=Normalize $part
 
-  $h=@($script:INDEX|Where-Object {(Normalize $_.partName) -eq $n}|Select-Object -First 1)
-  if($h.Count){
-    Ensure-Metadata $h[0] | Out-Null
-    Set-Prop $h[0] 'matchType' 'EXACT' | Out-Null
-    return $h[0]
+  if($script:BYNAME -and $script:BYNAME.ContainsKey($n)){
+    $candidate=@($script:BYNAME[$n])
+    if($candidate.Count -ge 1){
+      Ensure-Metadata $candidate[0] | Out-Null
+      Set-Prop $candidate[0] 'matchType' 'EXACT' | Out-Null
+      return $candidate[0]
+    }
   }
 
+  # Embedded-name match. Only examine names sharing the same normalized prefix.
   $h=@($script:INDEX|Where-Object {
     $en=Normalize $_.embeddedPartName
     $en -eq $n -or $en.StartsWith($n+'-')
@@ -221,13 +232,15 @@ function Find-Part([string]$part){
   }
 
   $vk=VariationKey $part
-  $vars=@($script:INDEX|Where-Object {(VariationKey $_.partName)-eq $vk})
-  if($vars.Count -eq 1){
-    Ensure-Metadata $vars[0] | Out-Null
-    Set-Prop $vars[0] 'matchType' 'VARIATION' | Out-Null
-    return $vars[0]
+  if($script:BYVAR -and $script:BYVAR.ContainsKey($vk)){
+    $vars=@($script:BYVAR[$vk])
+    if($vars.Count -eq 1){
+      Ensure-Metadata $vars[0] | Out-Null
+      Set-Prop $vars[0] 'matchType' 'VARIATION' | Out-Null
+      return $vars[0]
+    }
+    if($vars.Count -gt 1){return [pscustomobject]@{ambiguous=$vars}}
   }
-  if($vars.Count -gt 1){return [pscustomobject]@{ambiguous=$vars}}
   $null
 }
 
@@ -263,7 +276,9 @@ function Handle-Request($req){
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
     $root=[IO.Path]::GetFullPath(([string]$(if($b.libraryRoot){$b.libraryRoot}else{$DEFAULT_LIBRARY})).Trim())
-    Scan-Library $root|Out-Null
+    if(-not $script:INDEX -or $script:INDEX.Count -eq 0 -or [string]$CFG.libraryRoot -ne [string]$root){
+      Scan-Library $root|Out-Null
+    }
     $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
     $parts=@()
     foreach($p in @($b.parts)){
