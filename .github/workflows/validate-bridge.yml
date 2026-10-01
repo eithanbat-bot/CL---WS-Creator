@@ -15,7 +15,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $files = @(
             'bridge/server.ps1',
-            'bridge/create-sigmanest-ws.ps1'
+            'bridge/create-sigmanest-ws.ps1',
+            'bridge/dxf-indexer.ps1'
           )
 
           foreach ($file in $files) {
@@ -102,6 +103,18 @@ jobs:
 
           if ($creator -notmatch "sourceType") {
             throw 'SigmaNEST creator does not receive sourceType.'
+          }
+
+          if ($server -notmatch "Start-DxfScan") {
+            throw 'Server does not launch DXF indexing in the background.'
+          }
+
+          if ($server -notmatch "api/dxf-status") {
+            throw 'Server is missing DXF scan status endpoint.'
+          }
+
+          if ($server -match "Get-ChildItem -LiteralPath \\$dxfRoot -Recurse" -or $server -match "Get-GeometryFiles -root \\$dxfRoot") {
+            throw 'HTTP server path must not synchronously walk the DXF root.'
           }
 
           if ((Get-Content -Raw -LiteralPath 'taskpane.html') -notmatch 'placeholder="Y:\\"') {
