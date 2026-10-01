@@ -341,7 +341,7 @@ function Handle-Request($req){
     # Start the huge DXF walk in a background PowerShell process; never wait on Y:\ here.
     $dxfStatus=Start-DxfScan -root $dxfRoot
     $diag=Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot
-    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;dxfIndexedCount=$diag.dxfCount;dxfStatus=$dxfStatus;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot;parts=@($script:INDEX|ForEach-Object{[pscustomobject]@{partName=$_.partName;embeddedPartName=$_.embeddedPartName;fileType=$_.fileType;file=$_.file;likelyMaterial=$_.likelyMaterial;thickness=$_.thickness;sourceDxf=$_.sourceDxf}})}}
+    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;dxfIndexedCount=$diag.dxfCount;dxfStatus=$dxfStatus;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot;dxfRoot=$diag.dxfRoot}}
   }
   if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
     $status=Get-DxfStatus
