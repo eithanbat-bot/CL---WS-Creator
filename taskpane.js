@@ -26,7 +26,7 @@ async function bridge(path,opts){
     if(!r.ok)throw new Error(d.error||('Bridge request failed: '+r.status));
     return d;
   }catch(e){
-    if(e&&e.name==='AbortError')throw new Error('The local bridge did not finish the request within 30 seconds. The PRS scan may be taking too long on S:\\SNDataX1\\PARTS.');
+    if(e&&e.name==='AbortError')throw new Error('The local bridge did not finish within '+Math.round(timeout/1000)+' seconds. The requested operation is still running on the local PC.');
     if(e&&e.message==='Failed to fetch')throw new Error('Cannot connect to the local CL-WS bridge at '+url+'. Make sure start-bridge.bat is running on this PC.');
     throw e;
   }finally{
