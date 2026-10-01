@@ -36,6 +36,25 @@ jobs:
             Write-Host "$file syntax: OK" -ForegroundColor Green
           }
 
+
+      - name: Validate web files
+        shell: bash
+        run: |
+          set -e
+          node --check taskpane.js
+          node --check src/clParser.js
+          echo "JavaScript syntax: OK"
+
+      - name: Validate manifest XML
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $xml = [xml](Get-Content -Raw -LiteralPath 'manifest.xml')
+          if (-not $xml.OfficeApp) {
+            throw 'manifest.xml did not parse as an OfficeApp manifest.'
+          }
+          Write-Host 'manifest.xml: OK' -ForegroundColor Green
+
       - name: Check known build-path hazards
         shell: pwsh
         run: |
