@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile)
 $ErrorActionPreference='Stop'
+$CREATOR_VERSION='3.0.0'
 function Out($o){$o|ConvertTo-Json -Depth 12 -Compress}
 try{
   $req=Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8|ConvertFrom-Json
@@ -35,7 +36,13 @@ try{
     # loaded, CreatePartsListForNewPartsInWS() commits the newly loaded part
     # into the workspace PartsList.
     try{
-      $loaded=$app.LoadPart([string]$prs)
+      $loaded=$app.GetType().InvokeMember(
+        'LoadPart',
+        [Reflection.BindingFlags]::InvokeMethod,
+        $null,
+        $app,
+        @([string]$prs)
+      )
     }catch{
       throw ('SigmaNEST LoadPart failed for "'+$leaf+'.PRS": '+$_.Exception.Message)
     }
@@ -45,7 +52,15 @@ try{
 
     $beforeCount=0
     try{$beforeCount=[int]$app.PartsList.Count}catch{}
-    try{$app.CreatePartsListForNewPartsInWS()}catch{
+    try{
+      $app.GetType().InvokeMember(
+        'CreatePartsListForNewPartsInWS',
+        [Reflection.BindingFlags]::InvokeMethod,
+        $null,
+        $app,
+        @()
+      ) | Out-Null
+    }catch{
       throw ('SigmaNEST could not add "'+$leaf+'.PRS" to the workspace PartsList: '+$_.Exception.Message)
     }
 
@@ -66,12 +81,18 @@ try{
     try{$part.DrawingNumber=[string]$x.part}catch{}
     $created += [pscustomobject]@{part=$part.Name;qty=$part.QtyToNest;material=$part.Material;thickness=$part.Thickness;path=$part.Path;batchMultiplier=$x.batchMultiplier}
   }
-  $app.SaveWorkSpaceFile($wsPath)
+  $app.GetType().InvokeMember(
+    'SaveWorkSpaceFile',
+    [Reflection.BindingFlags]::InvokeMethod,
+    $null,
+    $app,
+    @([string]$wsPath)
+  ) | Out-Null
   try{$app.LoadWorkSpaceFile($wsPath)}catch{}
   try{$app.RefreshTreeView()}catch{}
   try{$app.Redraw()}catch{}
-  [pscustomobject]@{ok=$true;wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}|Out
+  [pscustomobject]@{ok=$true;creatorVersion=$CREATOR_VERSION;wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}|Out
 }catch{
-  [pscustomobject]@{ok=$false;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}|Out
+  [pscustomobject]@{ok=$false;creatorVersion=$CREATOR_VERSION;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}|Out
   exit 1
 }
