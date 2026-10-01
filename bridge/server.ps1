@@ -165,7 +165,7 @@ function Get-DxfStatus(){
 
 function Start-DxfScan([string]$root){
   $status=Get-DxfStatus
-  $requiredIndexerVersion='2.0.0'
+  $requiredIndexerVersion='2.0.1'
 
   if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'RUNNING'){
     if([string]$status.indexerVersion -eq $requiredIndexerVersion){
