@@ -4,7 +4,7 @@ param(
   [Parameter(Mandatory=$true)][string]$StatusFile
 )
 
-$ErrorActionPreference='Continue'
+$ErrorActionPreference='Continue'\n$DXF_INDEXER_VERSION='2.0.0'
 
 function Write-Status($state,$message,$count,$errorCount,$started,$finished=$null,$current=''){
   $obj=[pscustomobject]@{
