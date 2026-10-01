@@ -386,7 +386,7 @@ function Handle-Request($req){
   }
   if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
     $status=Get-DxfStatus
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;started=$status.started;finished=$status.finished;currentPath=[string]$status.currentPath}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;started=$status.started;finished=$status.finished;currentPath=[string]$status.currentPath}}
   }
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
@@ -395,6 +395,20 @@ function Handle-Request($req){
     $dxfStatus=Get-DxfStatus
     if([string]$dxfStatus.root -ne [string]$dxfRoot -or [string]$dxfStatus.state -ne 'COMPLETE'){
       $dxfStatus=Start-DxfScan -root $dxfRoot
+    }
+    # The server enforces the same rule as the UI: never classify unresolved
+    # DXFs as missing/review while the massive Y:\ index is incomplete.
+    if([string]$dxfStatus.root -eq [string]$dxfRoot -and [string]$dxfStatus.state -ne 'COMPLETE'){
+      $statusCode=409
+      return [pscustomobject]@{Status=$statusCode;Data=@{
+        error='DXF index is not complete yet.'
+        code='DXF_INDEX_NOT_READY'
+        state=[string]$dxfStatus.state
+        filesFound=[int]$dxfStatus.filesFound
+        root=[string]$dxfStatus.root
+        message=[string]$dxfStatus.message
+        currentPath=[string]$dxfStatus.currentPath
+      }}
     }
     if(
       -not $script:INDEX -or
