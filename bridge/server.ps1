@@ -139,30 +139,92 @@ function Sigma-Material([string]$cl,[string]$lib){
 function Scan-Library([string]$root) {
   if(-not(Test-Path -LiteralPath $root)){throw "Cannot access the PRS library folder: $root"}
   if(-not((Get-Item -LiteralPath $root).PSIsContainer)){throw "Library path is not a folder: $root"}
-  $files=@();$scanErrors=@();$inspectErrors=@()
-  try{$files=@(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction SilentlyContinue | Where-Object {$_.Extension -ieq '.prs'} | ForEach-Object {$_.FullName})}
-  catch{ $scanErrors += [pscustomobject]@{path=$root;error=$_.Exception.Message} }
-  $items=@()
-  foreach($file in $files){
-    try{$items += Inspect-Prs $file}catch{$inspectErrors += [pscustomobject]@{path=$file;error=$_.Exception.Message}}
+
+  $files=@();$scanErrors=@()
+  try{
+    # Fast scan of the selected PARTS directory only. Do not open every PRS file.
+    $files=@(Get-ChildItem -LiteralPath $root -Filter '*.prs' -File -Force -ErrorAction Stop | ForEach-Object {$_.FullName})
+  }catch{
+    $scanErrors += [pscustomobject]@{path=$root;error=$_.Exception.Message}
   }
+
+  $items=@($files | ForEach-Object {
+    [pscustomobject]@{
+      file=$_
+      fileName=[IO.Path]::GetFileName($_)
+      partName=[IO.Path]::GetFileNameWithoutExtension($_)
+      embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($_)
+      likelyMaterial=''
+      thickness=''
+      sourceDxf=''
+      rotations=''
+      metadataLoaded=$false
+    }
+  })
+
   $script:INDEX=$items
-  $CFG.libraryRoot=$root; $CFG.lastScan=(Get-Date).ToUniversalTime().ToString('o');$CFG.count=$items.Count
-  $CFG.discoveredFiles=$files.Count;$CFG.scanErrors=$scanErrors;$CFG.inspectErrors=$inspectErrors
+  $CFG.libraryRoot=$root
+  $CFG.lastScan=(Get-Date).ToUniversalTime().ToString('o')
+  $CFG.count=$items.Count
+  $CFG.discoveredFiles=$files.Count
+  $CFG.scanErrors=$scanErrors
+  $CFG.inspectErrors=@()
   try{($CFG|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $CFG_FILE -Encoding UTF8}catch{}
-  [pscustomobject]@{count=$items.Count;discoveredFiles=$files.Count;scanErrors=$scanErrors;inspectErrors=$inspectErrors;root=$root}
+  [pscustomobject]@{
+    count=$items.Count
+    discoveredFiles=$files.Count
+    scanErrors=$scanErrors
+    inspectErrors=@()
+    root=$root
+  }
 }
+
+function Ensure-Metadata($item) {
+  if($item.metadataLoaded){return $item}
+  try{
+    $meta=Inspect-Prs ([string]$item.file)
+    foreach($p in $meta.PSObject.Properties){
+      $item|Add-Member NoteProperty $p.Name $p.Value -Force
+    }
+    $item|Add-Member NoteProperty metadataLoaded $true -Force
+  }catch{
+    $item|Add-Member NoteProperty metadataLoaded $true -Force
+    $item|Add-Member NoteProperty metadataError $_.Exception.Message -Force
+  }
+  return $item
+}
+
 function Find-Part([string]$part){
   $n=Normalize $part
-  $h=$script:INDEX|Where-Object {(Normalize $_.partName) -eq $n}|Select-Object -First 1
-  if($h){$h|Add-Member NoteProperty matchType EXACT -Force;return $h}
-  $h=$script:INDEX|Where-Object {(Normalize $_.embeddedPartName) -eq $n -or (Normalize $_.embeddedPartName).StartsWith($n+'-')}|Select-Object -First 1
-  if($h){$h|Add-Member NoteProperty matchType EMBEDDED -Force;return $h}
-  $vk=VariationKey $part;$vars=@($script:INDEX|Where-Object {(VariationKey $_.partName)-eq $vk})
-  if($vars.Count -eq 1){$vars[0]|Add-Member NoteProperty matchType VARIATION -Force;return $vars[0]}
+
+  $h=@($script:INDEX|Where-Object {(Normalize $_.partName) -eq $n}|Select-Object -First 1)
+  if($h.Count){
+    Ensure-Metadata $h[0] | Out-Null
+    $h[0]|Add-Member NoteProperty matchType EXACT -Force
+    return $h[0]
+  }
+
+  $h=@($script:INDEX|Where-Object {
+    $en=Normalize $_.embeddedPartName
+    $en -eq $n -or $en.StartsWith($n+'-')
+  }|Select-Object -First 1)
+  if($h.Count){
+    Ensure-Metadata $h[0] | Out-Null
+    $h[0]|Add-Member NoteProperty matchType EMBEDDED -Force
+    return $h[0]
+  }
+
+  $vk=VariationKey $part
+  $vars=@($script:INDEX|Where-Object {(VariationKey $_.partName)-eq $vk})
+  if($vars.Count -eq 1){
+    Ensure-Metadata $vars[0] | Out-Null
+    $vars[0]|Add-Member NoteProperty matchType VARIATION -Force
+    return $vars[0]
+  }
   if($vars.Count -gt 1){return [pscustomobject]@{ambiguous=$vars}}
   $null
 }
+
 function Csv([object]$v){
   $s=[string]$v
   if($s -match '[,"\r\n]'){'"' + ($s -replace '"','""') + '"'}else{$s}
