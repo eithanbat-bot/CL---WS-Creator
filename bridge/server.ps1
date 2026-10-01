@@ -2,11 +2,12 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.1.0'
+$BRIDGE_VERSION = '2.2.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
+$DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CFG_FILE = Join-Path $ROOT 'config.json'
-$CFG = [ordered]@{ libraryRoot=$DEFAULT_LIBRARY; lastScan=$null; count=0; discoveredFiles=0; scanErrors=@(); inspectErrors=@() }
+$CFG = [ordered]@{ libraryRoot=$DEFAULT_LIBRARY; dxfRoot=$DEFAULT_DXF_LIBRARY; lastScan=$null; count=0; discoveredFiles=0; prsCount=0; dxfCount=0; scanErrors=@(); inspectErrors=@() }
 
 try {
   if(Test-Path -LiteralPath $CFG_FILE){
@@ -154,39 +155,56 @@ function Sigma-Material([string]$cl,[string]$lib){
   $s=$s -replace '\s+(sheet|plate)$',''
   $s.Trim()
 }
-function Scan-Library([string]$root) {
-  if(-not(Test-Path -LiteralPath $root)){throw "Cannot access the geometry library folder: $root"}
-  if(-not((Get-Item -LiteralPath $root).PSIsContainer)){throw "Geometry library path is not a folder: $root"}
-
-  $files=@();$scanErrors=@()
+function Get-GeometryFiles([string]$root,[string]$extension,[System.Collections.ArrayList]$errors){
+  if([string]::IsNullOrWhiteSpace($root)){return @()}
   try{
-    # Search the configured server folder recursively. We index BOTH legacy
-    # SigmaNEST .PRS files and new .DXF geometry files.
-    $files=@(
+    if(-not(Test-Path -LiteralPath $root)){throw "Cannot access geometry folder: $root"}
+    if(-not((Get-Item -LiteralPath $root).PSIsContainer)){throw "Geometry path is not a folder: $root"}
+    @(
       Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -ieq '.prs' -or $_.Extension -ieq '.dxf' } |
+        Where-Object { $_.Extension -ieq $extension } |
         ForEach-Object { $_.FullName }
     )
   }catch{
-    $scanErrors += [pscustomobject]@{path=$root;error=$_.Exception.Message}
+    [void]$errors.Add([pscustomobject]@{path=$root;error=$_.Exception.Message})
+    @()
   }
+}
 
-  $items=@($files | ForEach-Object {
-    $ext=[IO.Path]::GetExtension($_)
-    $type=if($ext -ieq '.prs'){'PRS'}else{'DXF'}
-    [pscustomobject]@{
-      file=$_
-      fileName=[IO.Path]::GetFileName($_)
-      partName=[IO.Path]::GetFileNameWithoutExtension($_)
-      embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($_)
-      fileType=$type
+function Scan-Libraries([string]$prsRoot,[string]$dxfRoot) {
+  $scanErrors=New-Object System.Collections.ArrayList
+  $prsFiles=@(Get-GeometryFiles -root $prsRoot -extension '.prs' -errors $scanErrors)
+  $dxfFiles=@(Get-GeometryFiles -root $dxfRoot -extension '.dxf' -errors $scanErrors)
+
+  $items=@()
+  foreach($file in $prsFiles){
+    $items += [pscustomobject]@{
+      file=$file
+      fileName=[IO.Path]::GetFileName($file)
+      partName=[IO.Path]::GetFileNameWithoutExtension($file)
+      embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($file)
+      fileType='PRS'
       likelyMaterial=''
       thickness=''
-      sourceDxf=$(if($type -eq 'DXF'){$_}else{''})
+      sourceDxf=''
       rotations=''
-      metadataLoaded=($type -eq 'DXF')
+      metadataLoaded=$false
     }
-  })
+  }
+  foreach($file in $dxfFiles){
+    $items += [pscustomobject]@{
+      file=$file
+      fileName=[IO.Path]::GetFileName($file)
+      partName=[IO.Path]::GetFileNameWithoutExtension($file)
+      embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($file)
+      fileType='DXF'
+      likelyMaterial=''
+      thickness=''
+      sourceDxf=$file
+      rotations=''
+      metadataLoaded=$true
+    }
+  }
 
   $script:INDEX=$items
   $script:BYNAME=@{}
@@ -204,27 +222,26 @@ function Scan-Library([string]$root) {
     }
   }
 
-  $prsCount=@($items|Where-Object {$_.fileType -eq 'PRS'}).Count
-  $dxfCount=@($items|Where-Object {$_.fileType -eq 'DXF'}).Count
-
-  $CFG.libraryRoot=$root
+  $CFG.libraryRoot=$prsRoot
+  $CFG.dxfRoot=$dxfRoot
   $CFG.lastScan=(Get-Date).ToUniversalTime().ToString('o')
   $CFG.count=$items.Count
-  $CFG.discoveredFiles=$files.Count
-  $CFG.prsCount=$prsCount
-  $CFG.dxfCount=$dxfCount
-  $CFG.scanErrors=$scanErrors
+  $CFG.discoveredFiles=$items.Count
+  $CFG.prsCount=$prsFiles.Count
+  $CFG.dxfCount=$dxfFiles.Count
+  $CFG.scanErrors=@($scanErrors)
   $CFG.inspectErrors=@()
   try{($CFG|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $CFG_FILE -Encoding UTF8}catch{}
 
   [pscustomobject]@{
     count=$items.Count
-    discoveredFiles=$files.Count
-    prsCount=$prsCount
-    dxfCount=$dxfCount
-    scanErrors=$scanErrors
+    discoveredFiles=$items.Count
+    prsCount=$prsFiles.Count
+    dxfCount=$dxfFiles.Count
+    scanErrors=@($scanErrors)
     inspectErrors=@()
-    root=$root
+    prsRoot=$prsRoot
+    dxfRoot=$dxfRoot
   }
 }
 
@@ -339,20 +356,23 @@ function Write-Job([string]$root,[string]$name,$parts){
 function Handle-Request($req){
   if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
   if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG.libraryRoot;lastScan=$CFG.lastScan;count=[int]$CFG.count;discoveredFiles=[int]$CFG.discoveredFiles;prsCount=[int]$CFG.prsCount;dxfCount=[int]$CFG.dxfCount;sigmaNestCom=$true;bridge='PowerShell'}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG.libraryRoot;dxfRoot=$CFG.dxfRoot;lastScan=$CFG.lastScan;count=[int]$CFG.count;discoveredFiles=[int]$CFG.discoveredFiles;prsCount=[int]$CFG.prsCount;dxfCount=[int]$CFG.dxfCount;sigmaNestCom=$true;bridge='PowerShell'}}
   }
   if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
     $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
-    $root=[IO.Path]::GetFullPath(([string]$(if($b.root){$b.root}else{$DEFAULT_LIBRARY})).Trim())
-    $diag=Scan-Library -root $root
-    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;root=$diag.root;parts=@($script:INDEX|ForEach-Object{[pscustomobject]@{partName=$_.partName;embeddedPartName=$_.embeddedPartName;fileType=$_.fileType;file=$_.file;likelyMaterial=$_.likelyMaterial;thickness=$_.thickness;sourceDxf=$_.sourceDxf}})}}
+    $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
+    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
+    $diag=Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot
+    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot;root=$diag.prsRoot;parts=@($script:INDEX|ForEach-Object{[pscustomobject]@{partName=$_.partName;embeddedPartName=$_.embeddedPartName;fileType=$_.fileType;file=$_.file;likelyMaterial=$_.likelyMaterial;thickness=$_.thickness;sourceDxf=$_.sourceDxf}})}}
   }
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
-    $root=[IO.Path]::GetFullPath(([string]$(if($b.libraryRoot){$b.libraryRoot}else{$DEFAULT_LIBRARY})).Trim())
-    if(-not $script:INDEX -or $script:INDEX.Count -eq 0 -or [string]$CFG.libraryRoot -ne [string]$root){
-      Scan-Library -root $root|Out-Null
+    $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
+    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
+    if(-not $script:INDEX -or $script:INDEX.Count -eq 0 -or [string]$CFG.libraryRoot -ne [string]$prsRoot -or [string]$CFG.dxfRoot -ne [string]$dxfRoot){
+      Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot|Out-Null
     }
+    $root=$prsRoot
     $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
     $parts=@()
     foreach($p in @($b.parts)){
@@ -447,7 +467,7 @@ function Handle-Request($req){
     $staging=Write-Job -root $root -name $name -parts $parts
     if($review.Count -gt 0){return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message="Job staged, but $($review.Count) part(s) require review before SigmaNEST creation.";parts=$parts;reviewCount=$review.Count;reviewBreakdown=$reviewBreakdown;sigmaNestCreated=$false}}}
     $reqFile=Join-Path $ROOT ('_psrequest-'+[Diagnostics.Process]::GetCurrentProcess().Id+'-'+[DateTime]::Now.Ticks+'.json')
-    $request=[pscustomobject]@{jobName=$name;libraryRoot=$root;wsDirectory=[string]$b.wsDirectory;parts=@($parts|ForEach-Object{[pscustomobject]@{part=$_.part;qty=$_.qty;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});taskSheet=$_.sheet;sourcePath=$_.sourcePath;sourceType=$_.sourceType;prsPath=$(if($_.sourceType -eq 'PRS'){[string]$_.sourcePath}else{''});sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial));thicknessMm=(Thickness-Number -s ([string]$_.thickness))}})}
+    $request=[pscustomobject]@{jobName=$name;libraryRoot=$root;dxfRoot=$dxfRoot;wsDirectory=[string]$b.wsDirectory;parts=@($parts|ForEach-Object{[pscustomobject]@{part=$_.part;qty=$_.qty;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});taskSheet=$_.sheet;sourcePath=$_.sourcePath;sourceType=$_.sourceType;prsPath=$(if($_.sourceType -eq 'PRS'){[string]$_.sourcePath}else{''});sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial));thicknessMm=(Thickness-Number -s ([string]$_.thickness))}})}
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
       $worker=Join-Path $ROOT 'create-sigmanest-ws.ps1'
