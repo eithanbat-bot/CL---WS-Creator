@@ -110,13 +110,13 @@ jobs:
             throw 'DXF status does not publish indexerVersion.'
           }
 
-          if ($updater -notmatch 'Test-Syntax') {
+          if ($updater -notmatch 'function Test-Syntax') {
             throw 'Updater is missing downloaded PowerShell syntax validation.'
           }
           if (-not $updater.Contains('$_.path -like ''bridge/*''')) {
             throw 'Updater does not discover bridge files from the GitHub tree.'
           }
-          if ($updater -notlike '*dxf-index.json*' -or $updater -notlike '*dxf-index-status.json*') {
+          if ($updater -notmatch 'dxf-index\\.json' -or $updater -notmatch 'dxf-index-status\\.json') {
             throw 'Updater does not preserve generated DXF index state.'
           }
 
