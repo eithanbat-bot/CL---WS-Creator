@@ -9,22 +9,27 @@ function pill(t,k){$('statusPill').textContent=t;$('statusPill').className='pill
 async function bridge(path,opts){
   opts=opts||{};
   var url=BRIDGE+path;
+  var controller=window.AbortController?new AbortController():null;
+  var timer=controller?window.setTimeout(function(){controller.abort()},30000):null;
   try{
-    var r=await fetch(url,{
+    var init={
       method:opts.method||'GET',
       headers:{'Content-Type':'application/json'},
       body:opts.body,
       targetAddressSpace:'loopback',
       cache:'no-store'
-    });
+    };
+    if(controller)init.signal=controller.signal;
+    var r=await fetch(url,init);
     var d={};try{d=await r.json()}catch(e){}
     if(!r.ok)throw new Error(d.error||('Bridge request failed: '+r.status));
     return d;
   }catch(e){
-    if(e&&e.message==='Failed to fetch'){
-      throw new Error('Cannot connect to the local CL-WS bridge at '+url+'. Make sure start-bridge.bat is running on this PC, then click Scan again. If it is already running, close it and start it again so the updated bridge loads.');
-    }
+    if(e&&e.name==='AbortError')throw new Error('The local bridge did not finish the request within 30 seconds. The PRS scan may be taking too long on S:\\SNDataX1\\PARTS.');
+    if(e&&e.message==='Failed to fetch')throw new Error('Cannot connect to the local CL-WS bridge at '+url+'. Make sure start-bridge.bat is running on this PC.');
     throw e;
+  }finally{
+    if(timer)window.clearTimeout(timer);
   }
 }
 
@@ -188,24 +193,33 @@ async function preview(){
 }
 
 async function scan(){
+  var btn=$('scanLibrary');
+  var started=Date.now();
+  btn.disabled=true;
+  $('libraryStatus').textContent='Scanning S:\\SNDataX1\\PARTS ...';
+  pill('Scanning PRS','neutral');
   try{
     var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     $('libraryPath').value=root;
     var r=await bridge('/api/scan',{method:'POST',body:JSON.stringify({root:root})});
     var scanErrors=(r.scanErrors||[]).length, inspectErrors=(r.inspectErrors||[]).length;
+    var elapsed=Math.round((Date.now()-started)/1000);
     if(!r.count && !r.discoveredFiles){
-      $('libraryStatus').textContent='No .PRS files were found in the selected folder.';
+      $('libraryStatus').textContent='No .PRS files were found in the selected folder. Scan completed in '+elapsed+'s.';
       pill('No PRS files','warn');
     }else if(scanErrors||inspectErrors){
-      $('libraryStatus').textContent=r.count+' .PRS files indexed; '+(scanErrors+inspectErrors)+' file/folder read issue(s). First: '+(r.scanErrors&&r.scanErrors[0]?r.scanErrors[0].path+': '+r.scanErrors[0].error:r.inspectErrors[0].path+': '+r.inspectErrors[0].error);
+      var first=(r.scanErrors&&r.scanErrors[0])?(r.scanErrors[0].path+': '+r.scanErrors[0].error):(r.inspectErrors[0]?r.inspectErrors[0].path+': '+r.inspectErrors[0].error:'Unknown scan issue');
+      $('libraryStatus').textContent=r.count+' .PRS files indexed; '+(scanErrors+inspectErrors)+' file/folder read issue(s). First: '+first+' ('+elapsed+'s)';
       pill('Library partial','warn');
     }else{
-      $('libraryStatus').textContent=r.count+' .PRS files indexed.';
+      $('libraryStatus').textContent=r.count+' .PRS files indexed in '+elapsed+'s.';
       pill('Library ready','ok');
     }
   }catch(e){
     $('libraryStatus').textContent=e.message;
-    pill('Bridge offline','bad');
+    pill(e.message.indexOf('did not finish')>=0?'Scan timeout':'Bridge error','bad');
+  }finally{
+    btn.disabled=false;
   }
 }
 
