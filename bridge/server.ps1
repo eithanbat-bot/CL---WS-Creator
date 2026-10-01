@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '1.7.0'
+$BRIDGE_VERSION = '1.8.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CFG_FILE = Join-Path $ROOT 'config.json'
@@ -119,7 +119,7 @@ function Inspect-Prs([string]$file) {
 }
 
 function Normalize([string]$s){ if($null -eq $s){$s=''}; (($s.ToUpperInvariant() -replace '[^A-Z0-9]','') -replace 'PRS$','') }
-function VariationKey([string]$s){ $n=Normalize $s; if($n -match '[A-Z]$'){$n=$n.Substring(0,$n.Length-1)}; $n }
+function VariationKey([string]$s){ $n=Normalize -s $s; if($n -match '[A-Z]$'){$n=$n.Substring(0,$n.Length-1)}; $n }
 function Normalize-Material([string]$s){
   if($null -eq $s){$s=''}
   $s=$s -replace '(?i)Armoxt|Amoxt','Armox'
@@ -131,14 +131,14 @@ function Thickness-Number([string]$s){
   if($m.Success){[double]$m.Groups[1].Value}else{[double]::NaN}
 }
 function Material-Equal([string]$a,[string]$b){
-  $A=(Normalize-Material $a).ToUpperInvariant();$B=(Normalize-Material $b).ToUpperInvariant()
+  $A=(Normalize-Material -s $a).ToUpperInvariant();$B=(Normalize-Material -s $b).ToUpperInvariant()
   if(-not $A -or -not $B -or $A -eq $B){return $true}
   if($A -match '4\s*MM\s*ARMOX' -and $B -match 'RAMOR\s*500'){return $true}
   if($B -match '4\s*MM\s*ARMOX' -and $A -match 'RAMOR\s*500'){return $true}
   return ($A.Contains($B) -or $B.Contains($A))
 }
 function Sigma-Material([string]$cl,[string]$lib){
-  $s=Normalize-Material $(if($lib){$lib}else{$cl})
+  $s=Normalize-Material -s ([string]$(if($lib){$lib}else{$cl}))
   $s=$s -replace '^\d+(?:\.\d+)?\s*mm\s*',''
   $s=$s -replace '\s+(sheet|plate)$',''
   $s.Trim()
@@ -173,9 +173,9 @@ function Scan-Library([string]$root) {
   $script:BYNAME=@{}
   $script:BYVAR=@{}
   foreach($item in $items){
-    $nk=Normalize $item.partName
+    $nk=Normalize -s $item.partName
     if($nk){ if(-not $script:BYNAME.ContainsKey($nk)){$script:BYNAME[$nk]=@()}; $script:BYNAME[$nk]+=$item }
-    $vk=VariationKey $item.partName
+    $vk=VariationKey -s $item.partName
     if($vk){ if(-not $script:BYVAR.ContainsKey($vk)){$script:BYVAR[$vk]=@()}; $script:BYVAR[$vk]+=$item }
   }
   $CFG.libraryRoot=$root
@@ -210,12 +210,12 @@ function Ensure-Metadata($item) {
 }
 
 function Find-Part([string]$part){
-  $n=Normalize $part
+  $n=Normalize -s $part
 
   if($script:BYNAME -and $script:BYNAME.ContainsKey($n)){
     $candidate=@($script:BYNAME[$n])
     if($candidate.Count -ge 1){
-      Ensure-Metadata $candidate[0] | Out-Null
+      Ensure-Metadata -item $candidate[0] | Out-Null
       Set-Prop $candidate[0] 'matchType' 'EXACT' | Out-Null
       return $candidate[0]
     }
@@ -223,20 +223,20 @@ function Find-Part([string]$part){
 
   # Embedded-name match. Only examine names sharing the same normalized prefix.
   $h=@($script:INDEX|Where-Object {
-    $en=Normalize $_.embeddedPartName
+    $en=Normalize -s $_.embeddedPartName
     $en -eq $n -or $en.StartsWith($n+'-')
   }|Select-Object -First 1)
   if($h.Count){
-    Ensure-Metadata $h[0] | Out-Null
+    Ensure-Metadata -item $h[0] | Out-Null
     Set-Prop $h[0] 'matchType' 'EMBEDDED' | Out-Null
     return $h[0]
   }
 
-  $vk=VariationKey $part
+  $vk=VariationKey -s $part
   if($script:BYVAR -and $script:BYVAR.ContainsKey($vk)){
     $vars=@($script:BYVAR[$vk])
     if($vars.Count -eq 1){
-      Ensure-Metadata $vars[0] | Out-Null
+      Ensure-Metadata -item $vars[0] | Out-Null
       Set-Prop $vars[0] 'matchType' 'VARIATION' | Out-Null
       return $vars[0]
     }
@@ -257,7 +257,7 @@ function Write-Job([string]$root,[string]$name,$parts){
   $rows=@('Part,Qty,Material,Thickness,PRS,MatchType,PRS_Material,PRS_Thickness,SourceDXF,Status')
   foreach($p in $parts){
     $vals=@($p.part,$p.qty,$p.material,$p.thickness,$(if($p.prs){[IO.Path]::GetFileName($p.prs)}else{''}),$p.matchType,$p.libraryMaterial,$p.libraryThickness,$p.sourceDxf,$p.status)
-    $rows += (($vals|ForEach-Object{Csv $_}) -join ',')
+    $rows += (($vals|ForEach-Object{Csv -v $_}) -join ',')
   }
   $rowsFile=Join-Path -Path $out -ChildPath 'WS_PARTS.csv'
   $rows|Set-Content -LiteralPath $rowsFile -Encoding UTF8
@@ -274,25 +274,25 @@ function Handle-Request($req){
   if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
     $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
     $root=[IO.Path]::GetFullPath(([string]$(if($b.root){$b.root}else{$DEFAULT_LIBRARY})).Trim())
-    $diag=Scan-Library $root
+    $diag=Scan-Library -root $root
     return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;root=$diag.root;parts=@($script:INDEX|ForEach-Object{[pscustomobject]@{partName=$_.partName;embeddedPartName=$_.embeddedPartName;likelyMaterial=$_.likelyMaterial;thickness=$_.thickness;sourceDxf=$_.sourceDxf}})}}
   }
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
     $root=[IO.Path]::GetFullPath(([string]$(if($b.libraryRoot){$b.libraryRoot}else{$DEFAULT_LIBRARY})).Trim())
     if(-not $script:INDEX -or $script:INDEX.Count -eq 0 -or [string]$CFG.libraryRoot -ne [string]$root){
-      Scan-Library $root|Out-Null
+      Scan-Library -root $root|Out-Null
     }
     $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
     $parts=@()
     foreach($p in @($b.parts)){
-      $f=Find-Part ([string]$p.part)
+      $f=Find-Part -part ([string]$p.part)
       if(-not$f){Set-Prop $p 'status' 'MISSING' | Out-Null;Set-Prop $p 'statusLabel' 'GEOMETRY MISSING' | Out-Null;$parts+=$p;continue}
       if($f.PSObject.Properties.Name -contains 'ambiguous'){
         Set-Prop $p 'status' 'REVIEW' | Out-Null;Set-Prop $p 'statusLabel' ('AMBIGUOUS ('+$f.ambiguous.Count+')') | Out-Null;$parts+=$p;continue
       }
       $libMat=[string]$f.likelyMaterial;$libThk=[string]$f.thickness
-      $matKnown=!!$libMat.Trim();$thkKnown=!!$libThk.Trim();$mok=$matKnown -and (Material-Equal $p.material $libMat);$tok=$thkKnown -and !!$p.thickness -and ((Thickness-Number $p.thickness) -eq (Thickness-Number $libThk));$variation=([string]$f.matchType -eq 'VARIATION')
+      $matKnown=!!$libMat.Trim();$thkKnown=!!$libThk.Trim();$mok=$matKnown -and (Material-Equal -a ([string]$p.material) -b $libMat);$tok=$thkKnown -and !!$p.thickness -and ((Thickness-Number -s ([string]$p.thickness)) -eq (Thickness-Number -s $libThk));$variation=([string]$f.matchType -eq 'VARIATION')
       $status=if($matKnown -and $thkKnown -and $mok -and $tok -and -not$variation){'READY'}else{'REVIEW'}
       $label=if($status -eq 'READY'){'FOUND'}elseif($variation){'VARIATION - REVIEW'}elseif(-not$matKnown){'MATERIAL NOT CONFIRMED'}elseif(-not$mok){'MATERIAL MISMATCH'}elseif(-not$thkKnown){'THICKNESS NOT CONFIRMED'}elseif(-not$tok){'THICKNESS MISMATCH'}else{'REVIEW'}
       Set-Prop $p 'status' $status | Out-Null;Set-Prop $p 'statusLabel' $label | Out-Null
@@ -300,10 +300,10 @@ function Handle-Request($req){
       $parts+=$p
     }
     $review=@($parts|Where-Object {$_.status -ne 'READY'})
-    $staging=Write-Job $root $name $parts
+    $staging=Write-Job -root $root -name $name -parts $parts
     if($review.Count -gt 0){return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message="Job staged, but $($review.Count) part(s) require review before SigmaNEST creation.";parts=$parts;reviewCount=$review.Count;sigmaNestCreated=$false}}}
     $reqFile=Join-Path $ROOT ('_psrequest-'+[Diagnostics.Process]::GetCurrentProcess().Id+'-'+[DateTime]::Now.Ticks+'.json')
-    $request=[pscustomobject]@{jobName=$name;libraryRoot=$root;wsDirectory=[string]$b.wsDirectory;parts=@($parts|ForEach-Object{[pscustomobject]@{part=$_.part;qty=$_.qty;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});taskSheet=$_.sheet;prsPath=$_.file;sigmaMaterial=(Sigma-Material $_.material $_.libraryMaterial);thicknessMm=(Thickness-Number $_.thickness)}})}
+    $request=[pscustomobject]@{jobName=$name;libraryRoot=$root;wsDirectory=[string]$b.wsDirectory;parts=@($parts|ForEach-Object{[pscustomobject]@{part=$_.part;qty=$_.qty;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});taskSheet=$_.sheet;prsPath=$_.file;sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial));thicknessMm=(Thickness-Number -s ([string]$_.thickness))}})}
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
       $worker=Join-Path $ROOT 'create-sigmanest-ws.ps1'
