@@ -40,7 +40,7 @@ copy /y "%TMP%\dxf-indexer.ps1" "%BRIDGE%\dxf-indexer.ps1" >nul
 copy /y "%TMP%\create-sigmanest-ws.ps1" "%BRIDGE%\create-sigmanest-ws.ps1" >nul
 
 echo [CL-WS] Confirming installed version...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t=Get-Content -Raw '%BRIDGE%\server.ps1'; if($t -notmatch '\$BRIDGE_VERSION\s*=\s*''2\.3\.0'''){throw 'Installed bridge is not version 2.3.1.'}; Write-Host '[CL-WS] Installed bridge version: 2.3.1' -ForegroundColor Green"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t=Get-Content -Raw '%BRIDGE%\server.ps1'; if($t -notmatch '\$BRIDGE_VERSION\s*=\s*''2\.3\.1'''){throw 'Installed bridge is not version 2.3.1.'}; Write-Host '[CL-WS] Installed bridge version: 2.3.1' -ForegroundColor Green"
 if errorlevel 1 goto FAIL
 
 echo.
