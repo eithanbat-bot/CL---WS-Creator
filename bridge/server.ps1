@@ -324,7 +324,6 @@ function Start-DxfScan([string]$root){
     }catch{}
 
     return $starting
-  }
   }catch{
     $failed=[pscustomobject]@{
       state='FAILED'
