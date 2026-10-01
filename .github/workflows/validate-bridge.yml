@@ -84,12 +84,16 @@ jobs:
             throw 'start-bridge.bat is missing the local syntax preflight.'
           }
 
-          if ($server -notmatch "Get-ChildItem -LiteralPath \$root -Recurse -File") {
-            throw 'Server scan is not recursive.'
+          if ($server -notmatch "function Scan-Libraries") {
+            throw 'Server scan does not use the separate PRS/DXF library scan.'
           }
 
-          if ($server -notmatch "Extension -ieq '\.prs' -or \$_.Extension -ieq '\.dxf'") {
-            throw 'Server scan is not indexing both PRS and DXF files.'
+          if ($server -notmatch "Get-GeometryFiles -root \$prsRoot -extension '\.prs'") {
+            throw 'Server scan is missing recursive PRS indexing.'
+          }
+
+          if ($server -notmatch "Get-GeometryFiles -root \$dxfRoot -extension '\.dxf'") {
+            throw 'Server scan is missing recursive DXF indexing.'
           }
 
           if ($server -notmatch "FOUND - DXF") {
@@ -98,6 +102,14 @@ jobs:
 
           if ($creator -notmatch "sourceType") {
             throw 'SigmaNEST creator does not receive sourceType.'
+          }
+
+          if ((Get-Content -Raw -LiteralPath 'taskpane.html') -notmatch 'placeholder="Y:\\"') {
+            throw 'Task pane does not default the DXF library to Y:\.'
+          }
+
+          if ((Get-Content -Raw -LiteralPath 'taskpane.js') -notmatch "dxfRoot.*Y:\\\\") {
+            throw 'Task pane does not use the Y:\ DXF root.'
           }
 
           Write-Host 'Build-path hazard checks: OK' -ForegroundColor Green
