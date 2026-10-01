@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.3.0'
+$BRIDGE_VERSION = '2.3.1'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -236,14 +236,23 @@ function Start-DxfScan([string]$root){
     }
     ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
 
-    $args="-NoProfile -ExecutionPolicy Bypass -File `"$DXF_SCAN_SCRIPT`" -Root `"$root`" -IndexFile `"$DXF_INDEX_FILE`" -StatusFile `"$DXF_STATUS_FILE`""
-    $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WindowStyle Hidden -PassThru
+    # Use an encoded PowerShell command so mapped/network paths and folders with
+    # spaces cannot be broken by Start-Process argument quoting.
+    $command="& '$DXF_SCAN_SCRIPT' -Root '$root' -IndexFile '$DXF_INDEX_FILE' -StatusFile '$DXF_STATUS_FILE'"
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $launchLog=Join-Path $ROOT 'dxf-indexer-launch.log'
+    try{
+      ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Launching powershell.exe -EncodedCommand for DXF indexer. Script='+$DXF_SCAN_SCRIPT+' Root='+$root)|Add-Content -LiteralPath $launchLog -Encoding UTF8
+    }catch{}
+    $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WorkingDirectory',$ROOT,'-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
     try{
       $starting.pid=$proc.Id
+      $starting.message='DXF indexer process launched (PID '+$proc.Id+'); waiting for the indexer heartbeat.'
       ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
+      ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Process launched. PID='+$proc.Id)|Add-Content -LiteralPath $launchLog -Encoding UTF8
     }catch{}
 
-    Start-Sleep -Milliseconds 1200
+    Start-Sleep -Milliseconds 1500
     try{
       $alive=Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
       if(-not $alive){
@@ -252,7 +261,11 @@ function Start-DxfScan([string]$root){
         if(Test-Path -LiteralPath $log){
           try{$logTail=(Get-Content -LiteralPath $log -Tail 8 -ErrorAction SilentlyContinue) -join ' | '}catch{}
         }
-        $message='DXF indexer exited immediately after launch.'
+        $launchTail=''
+        if(Test-Path -LiteralPath $launchLog){
+          try{$launchTail=(Get-Content -LiteralPath $launchLog -Tail 8 -ErrorAction SilentlyContinue) -join ' | '}catch{}
+        }
+        $message='DXF indexer exited immediately after launch. '+$launchTail
         if($logTail){$message+=' '+$logTail}
         $failed=[pscustomobject]@{
           state='FAILED'
@@ -263,10 +276,20 @@ function Start-DxfScan([string]$root){
           message=$message
           pid=$proc.Id
           logFile=$log
+          launchLogFile=$launchLog
         }
         try{($failed|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
         return $failed
       }
+      try{
+        $current=Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json
+        if([string]$current.message -eq 'DXF indexer process launched (PID '+$proc.Id+'); waiting for the indexer heartbeat.'){
+          $current.message='DXF indexer process is alive (PID '+$proc.Id+'); first heartbeat has not arrived yet.'
+          $current.logFile=(Join-Path $ROOT 'dxf-indexer.log')
+          $current.launchLogFile=$launchLog
+          ($current|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
+        }
+      }catch{}
     }catch{}
 
     return $starting
