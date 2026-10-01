@@ -143,7 +143,7 @@ function Scan-Library([string]$root) {
   $files=@();$scanErrors=@()
   try{
     # Fast scan of the selected PARTS directory only. Do not open every PRS file.
-    $files=@(Get-ChildItem -LiteralPath $root -Filter '*.prs' -File -Force -ErrorAction Stop | ForEach-Object {$_.FullName})
+    $files=@([IO.Directory]::EnumerateFiles($root,'*.prs',[IO.SearchOption]::TopDirectoryOnly))
   }catch{
     $scanErrors += [pscustomobject]@{path=$root;error=$_.Exception.Message}
   }
