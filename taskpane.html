@@ -1,15 +1,86 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=Edge"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CL - WS Creator</title>
-<link rel="stylesheet" href="taskpane.css">
-<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script></head>
-<body><main class="app">
-<header class="hero"><div><div class="eyebrow">SIGMANEST AUTOMATION</div><h1>CL - WS Creator</h1><p>Build a SigmaNEST job from the active cutting list using the local SigmaNEST .PRS Part List.</p></div><div id="statusPill" class="pill neutral">Starting...</div></header>
-<section class="card"><div class="sectionTitle">1. CL sheets</div><div class="row between"><button id="refreshSheets" class="secondary">Refresh sheets</button><div id="sheetCount" class="muted">0 selected</div></div><div id="sheetList" class="sheetList empty">Open the CL workbook in Excel, then refresh.</div></section>
-<section class="card"><div class="sectionTitle">2. SigmaNEST Part List</div><label>Local .PRS folder</label><div class="row"><input id="libraryPath" type="text" placeholder="S:\SNDataX1\PARTS"><button id="scanLibrary" class="secondary">Scan</button></div><div id="libraryStatus" class="muted">Local bridge not connected.</div></section>
-<section class="card"><div class="sectionTitle">3. Build</div><label>Job name</label><input id="jobName" type="text" placeholder="J032-26"><div class="row actionRow"><button id="preview" class="secondary">Preview CL</button><button id="build" class="primary">Create SigmaNEST Job</button></div><div id="buildStatus" class="muted">Nothing built yet.</div></section>
-<section class="card"><div class="sectionTitle">Results</div><div class="summaryGrid"><div><strong id="partsFound">0</strong><span>CL lines</span></div><div><strong id="geometryFound">0</strong><span>Ready</span></div><div><strong id="geometryMissing">0</strong><span>Review/Missing</span></div><div><strong id="totalQty">0</strong><span>Total Qty</span></div></div>
-<div class="tableWrap"><table id="resultTable"><thead><tr><th>Part</th><th>Qty</th><th>Material</th><th>Thk</th><th>Status</th></tr></thead><tbody></tbody></table></div></section>
-<footer><span>Build 1.0</span><span>Local bridge: 127.0.0.1:17832</span></footer>
-</main><script src="src/clParser.js"></script><script src="taskpane.js"></script></body></html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CL - WS Creator</title>
+  <link rel="stylesheet" href="taskpane.css">
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<main class="app">
+  <header class="hero">
+    <div>
+      <div class="eyebrow">SIGMANEST AUTOMATION</div>
+      <h1>CL - WS Creator</h1>
+      <p>Choose a cutting-list workbook, select the CL sheets to use, then build the SigmaNEST job.</p>
+    </div>
+    <div id="statusPill" class="pill neutral">Starting...</div>
+  </header>
+
+  <section class="card">
+    <div class="sectionTitle">1. Choose CL workbook</div>
+    <div class="row">
+      <input id="clFile" type="file" accept=".xlsx,.xls" hidden>
+      <button id="chooseCL" class="primary">Choose CL Workbook</button>
+      <button id="clearCL" class="secondary" type="button" disabled>Clear</button>
+    </div>
+    <div id="clFileName" class="fileName">No CL workbook selected.</div>
+    <div id="clFileStatus" class="muted">Select the cutting-list .xlsx/.xls file from this PC.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">2. CL sheets</div>
+    <div class="row between">
+      <button id="refreshSheets" class="secondary" type="button" disabled>Reload CL sheets</button>
+      <div id="sheetCount" class="muted inline">0 selected</div>
+    </div>
+    <div id="sheetList" class="sheetList empty">Choose a CL workbook first.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">3. SigmaNEST Part List</div>
+    <label for="libraryPath">Local .PRS folder</label>
+    <div class="row">
+      <input id="libraryPath" type="text" placeholder="S:\SNDataX1\PARTS">
+      <button id="scanLibrary" class="secondary" type="button">Scan</button>
+    </div>
+    <div id="libraryStatus" class="muted">Local bridge not connected.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">4. Build</div>
+    <label for="jobName">Job name</label>
+    <input id="jobName" type="text" placeholder="J032-26">
+    <div class="row actionRow">
+      <button id="preview" class="secondary" type="button" disabled>Preview CL</button>
+      <button id="build" class="primary" type="button" disabled>Create SigmaNEST Job</button>
+    </div>
+    <div id="buildStatus" class="muted">Choose a CL workbook to begin.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">Results</div>
+    <div class="summaryGrid">
+      <div><strong id="partsFound">0</strong><span>CL lines</span></div>
+      <div><strong id="geometryFound">0</strong><span>Ready</span></div>
+      <div><strong id="geometryMissing">0</strong><span>Review/Missing</span></div>
+      <div><strong id="totalQty">0</strong><span>Total Qty</span></div>
+    </div>
+    <div class="tableWrap">
+      <table id="resultTable">
+        <thead><tr><th>Part</th><th>Qty</th><th>Material</th><th>Thk</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer><span>Build 1.1 — CL file picker</span><span>Local bridge: 127.0.0.1:17832</span></footer>
+</main>
+
+<script src="src/clParser.js"></script>
+<script src="taskpane.js"></script>
+</body>
+</html>
