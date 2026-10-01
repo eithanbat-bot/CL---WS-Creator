@@ -5,7 +5,7 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>aa4e069e-cb5f-4a00-81a4-877e021afeeb</Id>
-  <Version>1.4.3.0</Version>
+  <Version>1.4.4.0</Version>
   <ProviderName>CL - WS Creator</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
 
@@ -31,7 +31,7 @@
   </Requirements>
 
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html?v=2.3.0"/>
+    <SourceLocation DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html?v=__BUILD__"/>
   </DefaultSettings>
 
   <Permissions>ReadWriteDocument</Permissions>
@@ -95,7 +95,7 @@
 
       <bt:Urls>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/eithanbat-bot/CL---WS-Creator"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html?v=2.3.0"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html?v=__BUILD__"/>
       </bt:Urls>
 
       <bt:ShortStrings>
