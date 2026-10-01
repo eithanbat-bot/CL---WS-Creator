@@ -6,6 +6,7 @@
     dxf-index.json
     dxf-index-status.json
     dxf-index/
+  Local manifest is refreshed when it exists.
   The user only needs to run the same BAT again for future bridge updates.
 #>
 param([string]$Root)
@@ -76,6 +77,20 @@ function Download-File($url,$dest) {
   }finally{
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
   }
+}
+
+function Update-LocalManifest(){
+  $manifest=Join-Path $Root 'manifest.xml'
+  if(-not(Test-Path -LiteralPath $manifest)){return}
+  $tmp=Join-Path $tmpRoot 'manifest.xml'
+  Download-File ($RawBase+'manifest.xml') $tmp
+  try{
+    [xml](Get-Content -Raw -LiteralPath $tmp)|Out-Null
+  }catch{
+    throw 'Downloaded manifest.xml failed XML validation.'
+  }
+  Copy-Item -LiteralPath $tmp -Destination $manifest -Force
+  Say 'Updated local manifest.xml.' 'Green'
 }
 
 function Stop-OlderBridges(){
@@ -153,6 +168,18 @@ try{
       }
       $updated=$true
       Say ("Updated: "+($changed -join ', ')) 'Green'
+      try{
+        $manifest=Join-Path $Root 'manifest.xml'
+        if(Test-Path -LiteralPath $manifest){
+          $manifestTmp=Join-Path $tmp 'manifest.xml'
+          Download-File ($RawBase+'manifest.xml') $manifestTmp
+          [xml](Get-Content -Raw -LiteralPath $manifestTmp)|Out-Null
+          Copy-Item -LiteralPath $manifestTmp -Destination $manifest -Force
+          Say 'Updated local manifest.xml.' 'Green'
+        }
+      }catch{
+        throw ('Local manifest update failed: '+$_.Exception.Message)
+      }
     }catch{
       Say 'Update failed during file replacement. Restoring the previous bridge files...' 'Red'
       foreach($rel in $changed){
