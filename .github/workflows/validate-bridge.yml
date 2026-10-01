@@ -120,8 +120,11 @@ jobs:
             throw 'Updater does not preserve generated DXF index state.'
           }
 
-          if ($bat -notmatch 'Start Bridge Fixed' -and $bat -notmatch 'UPDATER_URL') {
-            throw 'Self-updating launcher is missing its GitHub updater.'
+          if ($bat -notmatch 'raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge') {
+            throw 'Launcher is not configured to download the current Creator bridge from GitHub.'
+          }
+          if ($bat -notmatch '2\.3\.0') {
+            throw 'Launcher does not verify/install bridge version 2.3.0.'
           }
           if ($taskpane -notmatch 'Start Bridge Fixed\.bat') {
             throw 'Task pane still instructs users to start the obsolete launcher name.'
