@@ -4,11 +4,13 @@ param(
   [Parameter(Mandatory=$true)][string]$StatusFile
 )
 
-$ErrorActionPreference='Continue'\n$DXF_INDEXER_VERSION='2.0.0'
+$ErrorActionPreference = 'Continue'
+$DXF_INDEXER_VERSION = '2.0.1'
 
 function Write-Status($state,$message,$count,$errorCount,$started,$finished=$null,$current=''){
   $obj=[pscustomobject]@{
     state=$state
+    indexerVersion=$DXF_INDEXER_VERSION
     root=$Root
     message=$message
     filesFound=[int]$count
@@ -25,11 +27,14 @@ function Write-Status($state,$message,$count,$errorCount,$started,$finished=$nul
 
 $started=(Get-Date).ToUniversalTime().ToString('o')
 try{
-  if(-not(Test-Path -LiteralPath $Root)){ throw "DXF root does not exist or is unavailable: $Root" }
-  if(-not((Get-Item -LiteralPath $Root).PSIsContainer)){ throw "DXF root is not a folder: $Root" }
+  if(-not(Test-Path -LiteralPath $Root)){throw "DXF root does not exist or is unavailable: $Root"}
+  if(-not((Get-Item -LiteralPath $Root).PSIsContainer)){throw "DXF root is not a folder: $Root"}
 
   $parent=Split-Path -Parent $IndexFile
-  if($parent -and -not(Test-Path -LiteralPath $parent)){ New-Item -ItemType Directory -Path $parent -Force|Out-Null }
+  if($parent -and -not(Test-Path -LiteralPath $parent)){
+    New-Item -ItemType Directory -Path $parent -Force|Out-Null
+  }
+
   $tmp=$IndexFile+'.tmp'
   Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
 
@@ -39,15 +44,12 @@ try{
   $lastStatus=Get-Date
   $lastHeartbeat=$lastStatus
 
-  Write-Status 'RUNNING' 'DXF indexer started. Walking Y:\ recursively. First progress update will include the current folder even before the first DXF is found.' 0 0 $started $null $Root
+  Write-Status 'RUNNING' 'DXF indexer started. Walking the DXF server recursively; progress is reported while folders are being visited.' 0 0 $started $null $Root
 
   $writer=New-Object IO.StreamWriter($tmp,$false,[Text.Encoding]::UTF8)
   try{
     $writer.WriteLine(('PartName'+[char]9+'File'))
 
-    # Use a streaming directory stack instead of Get-ChildItem -Recurse.
-    # This avoids waiting for a massive recursive enumeration to materialize
-    # and lets us publish progress even when no DXF has been found yet.
     $pending=New-Object 'System.Collections.Generic.Stack[string]'
     $pending.Push($Root)
 
@@ -79,7 +81,7 @@ try{
       }
 
       try{
-        foreach($subdir in [IO.Directory]::EnumerateDirectories($dir,[string]'*',[IO.SearchOption]::TopDirectoryOnly)){
+        foreach($subdir in [IO.Directory]::EnumerateDirectories($dir,'*',[IO.SearchOption]::TopDirectoryOnly)){
           try{$pending.Push($subdir)}catch{$errors++}
         }
       }catch{
@@ -99,6 +101,7 @@ try{
   }
 
   Move-Item -LiteralPath $tmp -Destination $IndexFile -Force
+
   $finished=(Get-Date).ToUniversalTime().ToString('o')
   Write-Status 'COMPLETE' ('DXF index complete: '+$count+' file(s) across '+$directories+' folder(s).') $count $errors $started $finished $Root
 }catch{
