@@ -9,7 +9,7 @@ The creator uses a local Windows bridge so the Excel task pane can access two se
 - PRS root: S:\\SNDataX1\\PARTS
 - DXF root: Y:\\
 
-Both roots are searched recursively through all subfolders. PRS and DXF files are indexed separately, while part-name matching can consider both sources when selecting the geometry for a CL line.
+Both roots are searched recursively through all subfolders. PRS is indexed directly by the bridge, while the very large Y:\ DXF tree is indexed by a separate background PowerShell process and persisted as a reusable filename index. Excel polls the index status instead of waiting on the server walk. Part-name matching can consider both sources when selecting geometry for a CL line.
 
 ## Implemented in the current build
 
