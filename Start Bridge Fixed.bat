@@ -5,15 +5,17 @@ cd /d "%~dp0"
 set "ROOT=%~dp0"
 set "UPDATER_URL=https://raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1"
 set "TEMP_UPDATER=%TEMP%\CL-WS-Creator-update-and-start.ps1"
+set "CLWSC_UPDATER_URL=%UPDATER_URL%"
+set "CLWSC_TEMP_UPDATER=%TEMP_UPDATER%"
 
 echo ==============================================
 echo CL - WS Creator - Self Updating Bridge
 echo ==============================================
 echo.
-echo Checking GitHub for the newest Creator bridge...
+echo Checking GitHub for the newest bridge files...
 echo.
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri '%UPDATER_URL%' -OutFile '%TEMP_UPDATER%' -UseBasicParsing -Headers @{'User-Agent'='CL-WS-Creator-Updater'} -TimeoutSec 60; exit 0 } catch { Write-Host '[CL-WS] Update download failed:'; Write-Host $_.Exception.Message; exit 1 }"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { Invoke-WebRequest -Uri $env:CLWSC_UPDATER_URL -OutFile $env:CLWSC_TEMP_UPDATER -UseBasicParsing -Headers @{'User-Agent'='CL-WS-Creator-Updater'} -TimeoutSec 60; exit 0 } catch { Write-Host '[CL-WS] Update download failed:'; Write-Host $_.Exception.Message; exit 1 }"
 if errorlevel 1 goto LOCAL_FALLBACK
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%TEMP_UPDATER%" -Root "%ROOT%"
