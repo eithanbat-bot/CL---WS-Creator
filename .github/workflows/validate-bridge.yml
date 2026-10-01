@@ -81,8 +81,8 @@ jobs:
           if ($server -notmatch 'function Start-DxfScan') {
             throw 'Server does not contain Start-DxfScan.'
           }
-          if ($server -notmatch "function Get-DxfIndexItems") {
-            throw 'Server does not contain the DXF index reader.'
+          if ($server -notmatch "function Get-DxfShardCandidates") {
+            throw 'Server does not contain the sharded DXF index reader.'
           }
           if ($server -match 'Get-ChildItem[^\r\n]*\\dxfRoot[^\r\n]*-Recurse') {
             throw 'Server must never recursively enumerate the DXF root during an HTTP request.'
