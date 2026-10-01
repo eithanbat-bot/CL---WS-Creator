@@ -53,10 +53,9 @@ try{
 
   $items=@(Download-Json ($ApiBase + '/bridge?ref=' + $Branch))
   $runtime=@($items|Where-Object {
-    $_.type -eq 'file' -and (
-      $_.name -match '\.ps1$' -or
-      $_.name -match '\.js$'
-    ) -and $_.name -notmatch '(^|/)config\.json$'
+    $_.type -eq 'file' -and
+    $_.name -notmatch '^(config\.json|dxf-index\.tsv|dxf-index-status\.json)$' -and
+    $_.name -notmatch '\\.tmp$'
   })
 
   if(-not $runtime.Count){throw 'GitHub returned no Creator bridge runtime files.'}
