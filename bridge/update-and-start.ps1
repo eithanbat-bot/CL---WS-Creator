@@ -116,7 +116,7 @@ try{
 
   foreach($rel in $files){
     $dest=Join-Path $tmp $rel
-    $url=$RawBase+'bridge/'+$rel.Replace('','/')
+    $url=$RawBase+'bridge/'+$rel.Replace('\\','/')
     Say "Downloading bridge\$rel..."
     Download-File $url $dest
     if([IO.Path]::GetExtension($rel).ToLowerInvariant() -eq '.ps1' -and -not(Test-Syntax $dest)){
