@@ -40,15 +40,21 @@ function createSigmaNest(parts,jobName,libraryRoot,wsDirectory){const reqPath=pa
 async function handle(req,res){if(req.method==='OPTIONS')return reply(res,204,{});try{
 if(req.url==='/api/health')return reply(res,200,{ok:true,port:PORT,libraryRoot:cfg.libraryRoot,lastScan:cfg.lastScan,count:cfg.count,discoveredFiles:cfg.discoveredFiles||cfg.count,scanErrors:cfg.scanErrors||[],inspectErrors:cfg.inspectErrors||[],sigmaNestCom:true});
 if(req.url==='/api/scan'&&req.method==='POST'){
-  const b=await readBody(req),root=path.resolve(String(b.root||DEFAULT_LIBRARY));
-  if(!fs.existsSync(root))return reply(res,400,{error:'Library folder does not exist: '+root});
-  if(!fs.statSync(root).isDirectory())return reply(res,400,{error:'Library path is not a folder: '+root});
+  const b=await readBody(req),rawRoot=String(b.root||DEFAULT_LIBRARY).trim();
+  if(!rawRoot)return reply(res,400,{error:'Enter the SigmaNEST .PRS library folder path.'});
+  const root=path.resolve(rawRoot);
+  let st;
+  try{st=fs.statSync(root);}catch(e){
+    return reply(res,400,{error:'Cannot access the PRS library folder: '+root+' | '+e.message,root:root});
+  }
+  if(!st.isDirectory())return reply(res,400,{error:'Library path is not a folder: '+root,root:root});
   const diag=ensure(root);
   return reply(res,200,{
     count:index.length,
     discoveredFiles:cfg.discoveredFiles||index.length,
     scanErrors:diag.scanErrors,
     inspectErrors:diag.inspectErrors,
+    root:root,
     parts:index.map(function(x){return {partName:x.partName,embeddedPartName:x.embeddedPartName,likelyMaterial:x.likelyMaterial,thickness:x.thickness,sourceDxf:x.sourceDxf}})
   });
 }
