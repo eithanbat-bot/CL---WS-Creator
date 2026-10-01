@@ -23,11 +23,37 @@ try{
     if([string]::IsNullOrWhiteSpace($prs)){continue}
     if(-not(Test-Path -LiteralPath $prs)){throw ('PRS not found: '+$prs)}
     $part=$null
-    try{$part=$app.PartsList.AddfromLibrary($prs)}catch{
-      $leaf=[IO.Path]::GetFileNameWithoutExtension($prs)
-      $part=$app.PartsList.AddfromLibrary($leaf)
+    $leaf=[IO.Path]::GetFileNameWithoutExtension($prs)
+
+    # SigmaNEST's COM wrapper is sensitive to PowerShell's normal COM
+    # argument binder. Invoke the COM method explicitly and pass exactly
+    # one string argument (the PRS/library part name).
+    $partsList=$app.PartsList
+    try{
+      $part=$partsList.GetType().InvokeMember(
+        'AddfromLibrary',
+        [Reflection.BindingFlags]::InvokeMethod,
+        $null,
+        $partsList,
+        @([string]$leaf)
+      )
+    }catch{
+      $firstError=$_.Exception.Message
+      # Some SigmaNEST installations expect the full PRS path instead of
+      # the library leaf name. Try that explicitly as a second form.
+      try{
+        $part=$partsList.GetType().InvokeMember(
+          'AddfromLibrary',
+          [Reflection.BindingFlags]::InvokeMethod,
+          $null,
+          $partsList,
+          @([string]$prs)
+        )
+      }catch{
+        throw ('Could not add PRS "'+$leaf+'" to SigmaNEST PartsList. First COM error: '+$firstError+'; second COM error: '+$_.Exception.Message)
+      }
     }
-    if($null -eq $part){throw ('SigmaNEST could not load part: '+$prs)}
+    if($null -eq $part){throw ('SigmaNEST could not load part: '+$leaf)}
     try{$part.QtyToNest=[int][math]::Round([double]$x.qty)}catch{}
     try{$part.Material=[string]$x.sigmaMaterial}catch{}
     try{$part.Thickness=[double]$x.thicknessMm}catch{}
