@@ -8,7 +8,7 @@ echo.
 REM Always refresh the bridge scripts into the actual bridge folder.
 REM This prevents an old copy in the project root from being executed.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $base='https://raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/'; New-Item -ItemType Directory -Force -Path '%~dp0bridge' | Out-Null; Invoke-WebRequest -UseBasicParsing -Uri ($base+'bridge/server.ps1') -OutFile '%~dp0bridge\server.ps1'; Invoke-WebRequest -UseBasicParsing -Uri ($base+'bridge/create-sigmanest-ws.ps1') -OutFile '%~dp0bridge\create-sigmanest-ws.ps1'; Write-Host 'Bridge scripts refreshed from GitHub.'"
+  "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $base='https://raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/'; New-Item -ItemType Directory -Force -Path '%~dp0bridge' | Out-Null; Invoke-WebRequest -UseBasicParsing -Uri ($base+'bridge/server.ps1') -OutFile '%~dp0bridge\server.ps1'; Invoke-WebRequest -UseBasicParsing -Uri ($base+'bridge/create-sigmanest-ws.ps1') -OutFile '%~dp0bridge\create-sigmanest-ws.ps1'; Invoke-WebRequest -UseBasicParsing -Uri ($base+'bridge/dxf-indexer.ps1') -OutFile '%~dp0bridge\dxf-indexer.ps1'; Write-Host 'Bridge scripts refreshed from GitHub.'"
 
 if errorlevel 1 (
   echo.
