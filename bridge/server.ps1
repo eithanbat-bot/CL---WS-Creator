@@ -244,7 +244,7 @@ function Start-DxfScan([string]$root){
     try{
       ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Launching powershell.exe -EncodedCommand for DXF indexer. Script='+$DXF_SCAN_SCRIPT+' Root='+$root)|Add-Content -LiteralPath $launchLog -Encoding UTF8
     }catch{}
-    $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WorkingDirectory',$ROOT,'-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
+    $proc=Start-Process -FilePath 'powershell.exe' -WorkingDirectory $ROOT -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
     try{
       $starting.pid=$proc.Id
       $starting.message='DXF indexer process launched (PID '+$proc.Id+'); waiting for the indexer heartbeat.'
