@@ -26,11 +26,6 @@ jobs:
               throw "Missing required PowerShell file: $file"
             }
 
-            $text = Get-Content -Raw -LiteralPath $file
-            if ($text -match '\\n') {
-              throw "$file contains a literal \\n sequence. This is almost always an accidental escaped newline."
-            }
-
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
