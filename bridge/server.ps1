@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '1.6.0'
+$BRIDGE_VERSION = '1.7.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CFG_FILE = Join-Path $ROOT 'config.json'
@@ -250,16 +250,19 @@ function Csv([object]$v){
   if($s -match '[,"\r\n]'){'"' + ($s -replace '"','""') + '"'}else{$s}
 }
 function Write-Job([string]$root,[string]$name,$parts){
-  $out=Join-Path $root ('_CL_WS_BUILDER\'+$name)
-  New-Item -ItemType Directory -Path (Join-Path $out 'parts') -Force|Out-Null
-  foreach($p in @($parts|Where-Object {$_.file})){Copy-Item -LiteralPath $p.file -Destination (Join-Path $out 'parts' ([IO.Path]::GetFileName($p.file))) -Force}
+  $out=Join-Path -Path $root -ChildPath ('_CL_WS_BUILDER\'+$name)
+  $partsDir=Join-Path -Path $out -ChildPath 'parts'
+  New-Item -ItemType Directory -Path $partsDir -Force|Out-Null
+  foreach($p in @($parts|Where-Object {$_.file})){Copy-Item -LiteralPath $p.file -Destination (Join-Path -Path (Join-Path -Path $out -ChildPath 'parts') -ChildPath ([IO.Path]::GetFileName($p.file))) -Force}
   $rows=@('Part,Qty,Material,Thickness,PRS,MatchType,PRS_Material,PRS_Thickness,SourceDXF,Status')
   foreach($p in $parts){
     $vals=@($p.part,$p.qty,$p.material,$p.thickness,$(if($p.prs){[IO.Path]::GetFileName($p.prs)}else{''}),$p.matchType,$p.libraryMaterial,$p.libraryThickness,$p.sourceDxf,$p.status)
     $rows += (($vals|ForEach-Object{Csv $_}) -join ',')
   }
-  $rows|Set-Content -LiteralPath (Join-Path $out 'WS_PARTS.csv') -Encoding UTF8
-  ($parts|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath (Join-Path $out 'SIGMANEST_JOB.json') -Encoding UTF8
+  $rowsFile=Join-Path -Path $out -ChildPath 'WS_PARTS.csv'
+  $rows|Set-Content -LiteralPath $rowsFile -Encoding UTF8
+  $jsonFile=Join-Path -Path $out -ChildPath 'SIGMANEST_JOB.json'
+  ($parts|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $jsonFile -Encoding UTF8
   $out
 }
 
