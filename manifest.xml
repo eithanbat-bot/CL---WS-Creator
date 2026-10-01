@@ -95,7 +95,7 @@
 
       <bt:Urls>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/eithanbat-bot/CL---WS-Creator"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html?v=2.2.1"/>
       </bt:Urls>
 
       <bt:ShortStrings>
