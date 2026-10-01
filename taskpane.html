@@ -15,7 +15,7 @@
     <div>
       <div class="eyebrow">SIGMANEST AUTOMATION</div>
       <h1>CL - WS Creator</h1>
-      <p>Choose a cutting-list workbook, select the CL sheets to use, then build the SigmaNEST job.</p>
+      <p>Choose a cutting-list workbook, select the CL sheets to use, find geometry on the server, then build the SigmaNEST job. A Summary and Part Review worksheet are created in the active Excel workbook.</p>
     </div>
     <div id="statusPill" class="pill neutral">Starting...</div>
   </header>
@@ -41,13 +41,13 @@
   </section>
 
   <section class="card">
-    <div class="sectionTitle">3. SigmaNEST Part List</div>
-    <label for="libraryPath">Local .PRS folder</label>
+    <div class="sectionTitle">3. Geometry Library</div>
+    <label for="libraryPath">Main server geometry folder (.PRS + .DXF)</label>
     <div class="row">
       <input id="libraryPath" type="text" placeholder="S:\SNDataX1\PARTS">
       <button id="scanLibrary" class="secondary" type="button">Scan</button>
     </div>
-    <div id="libraryStatus" class="muted">Local bridge not connected.</div>
+    <div id="libraryStatus" class="muted">The bridge searches this folder and all subfolders for .PRS and .DXF geometry.</div>
   </section>
 
   <section class="card">
@@ -71,13 +71,13 @@
     </div>
     <div class="tableWrap">
       <table id="resultTable">
-        <thead><tr><th>Part</th><th>Qty</th><th>Material</th><th>Thk</th><th>Status</th></tr></thead>
+        <thead><tr><th>Part</th><th>Qty</th><th>Material</th><th>Thk</th><th>Source</th><th>Match</th><th>Status</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </section>
 
-  <footer><span>Build 1.1 — CL file picker</span><span>Local bridge: 127.0.0.1:17832</span></footer>
+  <footer><span>Build 2.1 — Recursive PRS/DXF + Excel reports</span><span>Local bridge: 127.0.0.1:17832</span></footer>
 </main>
 
 <script src="src/clParser.js"></script>
