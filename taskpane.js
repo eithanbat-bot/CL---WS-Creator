@@ -67,8 +67,8 @@ async function writeReportSheets(result,job,selectedSheetNames){
 
   function rectangular(rows,cols){
     return rows.map(function(r){
-      var a=r.slice(0,cols);
-      while(a.length<cols)a.push('');
+      var a=[];
+      for(var i=0;i<cols;i++)a.push(r[i]==null?'':r[i]);
       return a;
     });
   }
@@ -116,6 +116,8 @@ async function writeReportSheets(result,job,selectedSheetNames){
   var summaryName='CL WS Summary';
   var reviewName='Part Review';
 
+  // Write values in a deliberately simple Excel transaction. Styling is separate
+  // so an Excel formatting/API quirk cannot prevent the report sheets from being created.
   await Excel.run(async function(context){
     var wb=context.workbook;
     var summarySheet=wb.worksheets.getItemOrNullObject(summaryName);
@@ -131,52 +133,32 @@ async function writeReportSheets(result,job,selectedSheetNames){
     await context.sync();
     if(!oldSummary.isNullObject)oldSummary.clear('All');
     if(!oldReview.isNullObject)oldReview.clear('All');
+    await context.sync();
 
-    var sm=rectangular(summaryData,2);
-    var sr=summarySheet.getRangeByIndexes(0,0,sm.length,2);
-    sr.values=sm;
-    sr.format.font.name='Segoe UI';
-    sr.format.font.size=10;
-
-    var title=summarySheet.getRange('A1:B1');
-    title.merge();
-    title.format.font.size=18;
-    title.format.font.bold=true;
-
-    var summaryHeaderRow=summarySheet.getRange('A8:B8');
-    summaryHeaderRow.format.font.bold=true;
-    summaryHeaderRow.format.fill.color='#0B2942';
-    summaryHeaderRow.format.font.color='#FFFFFF';
-
-    var actionHeaderRow=summarySheet.getRange('A23:B23');
-    actionHeaderRow.format.font.bold=true;
-    actionHeaderRow.format.fill.color='#E7EEF5';
-
-    summarySheet.getRange('A1:B'+sm.length).format.wrapText=true;
-    summarySheet.getRange('A1:A'+sm.length).format.columnWidth=210;
-    summarySheet.getRange('B1:B'+sm.length).format.columnWidth=420;
-
+    summarySheet.getRangeByIndexes(0,0,summaryData.length,2).values=rectangular(summaryData,2);
     var rm=[reviewHeaders].concat(reviewRows);
-    var rr=reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length);
-    rr.values=rectangular(rm,reviewHeaders.length);
-    rr.format.font.name='Segoe UI';
-    rr.format.font.size=10;
-    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.bold=true;
-    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.fill.color='#0B2942';
-    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.color='#FFFFFF';
-    reviewSheet.getUsedRange().format.wrapText=true;
-
-    var widths=[150,70,130,80,150,260,100,90,170,360,130,100,180];
-    widths.forEach(function(w,i){
-      reviewSheet.getRangeByIndexes(0,i,Math.min(rm.length,1),1).format.columnWidth=w;
-    });
-    try{reviewSheet.freezePanes.freezeRows(1)}catch(e){}
-    try{summarySheet.freezePanes.freezeRows(8)}catch(e){}
-
+    reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length).values=rectangular(rm,reviewHeaders.length);
     await context.sync();
   });
-}
 
+  // Formatting is best-effort only. The data above is already safely written.
+  try{
+    await Excel.run(async function(context){
+      var wb=context.workbook;
+      var summarySheet=wb.worksheets.getItem(summaryName);
+      var reviewSheet=wb.worksheets.getItem(reviewName);
+      summarySheet.getRange('A1:B1').format.font.bold=true;
+      summarySheet.getRange('A8:B8').format.font.bold=true;
+      summarySheet.getRange('A23:B23').format.font.bold=true;
+      reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.bold=true;
+      summarySheet.getUsedRange().format.wrapText=true;
+      reviewSheet.getUsedRange().format.wrapText=true;
+      await context.sync();
+    });
+  }catch(e){
+    // Values are the important part; report creation has already succeeded.
+  }
+}
 
 
 function resetCL(){
@@ -393,12 +375,26 @@ async function scan(){
   }
 }
 
+function reviewBreakdownText(breakdown){
+  var entries=[];
+  Object.keys(breakdown||{}).forEach(function(k){entries.push(k+': '+breakdown[k])});
+  return entries.join(' | ');
+}
+
 async function build(){
   var btn=$('build');
   btn.disabled=true;
   pill('Building job','neutral');
   $('buildStatus').textContent='Matching geometry and building the SigmaNEST job...';
   try{
+    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
+    var dxfStatus=await bridge('/api/dxf-status',{timeoutMs:4000});
+    if(String(dxfStatus.root||'').toUpperCase()===String(dxfRoot).toUpperCase() && String(dxfStatus.state||'').toUpperCase()!=='COMPLETE'){
+      var dsCount=Number(dxfStatus.filesFound)||0;
+      $('buildStatus').textContent='DXF index is still '+String(dxfStatus.state||'not ready').toLowerCase()+' under '+dxfRoot+'. '+dsCount+' DXF files indexed so far. Wait for the index to complete, then create the SigmaNEST job.';
+      pill('DXF index not ready','warn');
+      return;
+    }
     var parts=await readCL();
     var selectedNames=selectedSheets().map(function(s){return s.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
@@ -415,11 +411,13 @@ async function build(){
     $('geometryFound').textContent=ready;
     $('geometryMissing').textContent=out.length-ready;
     var msg=r.message||'Job staged.';
+    if(r.reviewCount&&r.reviewBreakdown)msg+=' Reasons: '+reviewBreakdownText(r.reviewBreakdown)+'.';
     try{
       await writeReportSheets(r,job,selectedNames);
       msg+=' Summary and Part Review sheets written to this workbook.';
     }catch(e){
-      msg+=' (Could not write report sheets: '+e.message+')';
+      var detail=e&&e.message?e.message:String(e);
+      msg+=' (Could not write report sheets: '+detail+')';
     }
     $('buildStatus').textContent=msg;
     pill(r.reviewCount?'Review required':'Job created',r.reviewCount?'warn':'ok');
