@@ -100,10 +100,10 @@ jobs:
             throw 'Server does not have the DXF-ready status path.'
           }
 
-          if ($indexer -notmatch '\[IO\.Directory\]::EnumerateFiles') {
+          if (-not $indexer.Contains('[IO.Directory]::EnumerateFiles')) {
             throw 'DXF indexer is not using the streaming directory enumerator.'
           }
-          if ($indexer -notmatch "DXF_INDEXER_VERSION = '2\.0\.1'") {
+          if (-not $indexer.Contains("$DXF_INDEXER_VERSION = '2.0.1'")) {
             throw 'Unexpected DXF indexer version.'
           }
           if ($indexer -notmatch 'indexerVersion=') {
