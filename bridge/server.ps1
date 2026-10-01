@@ -332,21 +332,31 @@ function Write-Job([string]$root,[string]$name,$parts){
 function Handle-Request($req){
   if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
   if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG.libraryRoot;dxfRoot=$CFG.dxfRoot;lastScan=$CFG.lastScan;count=[int]$CFG.count;discoveredFiles=[int]$CFG.discoveredFiles;prsCount=[int]$CFG.prsCount;dxfCount=[int]$CFG.dxfCount;sigmaNestCom=$true;bridge='PowerShell'}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG.libraryRoot;dxfRoot=$CFG.dxfRoot;lastScan=$CFG.lastScan;count=[int]$CFG.count;discoveredFiles=[int]$CFG.discoveredFiles;prsCount=[int]$CFG.prsCount;dxfCount=[int]$CFG.dxfCount;dxfIndexState=[string]$CFG.dxfIndexState;dxfIndexMessage=[string]$CFG.dxfIndexMessage;sigmaNestCom=$true;bridge='PowerShell'}}
   }
   if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
     $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
     $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
     $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
+    # Start the huge DXF walk in a background PowerShell process; never wait on Y:\ here.
+    $dxfStatus=Start-DxfScan -root $dxfRoot
     $diag=Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot
-    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot;root=$diag.prsRoot;parts=@($script:INDEX|ForEach-Object{[pscustomobject]@{partName=$_.partName;embeddedPartName=$_.embeddedPartName;fileType=$_.fileType;file=$_.file;likelyMaterial=$_.likelyMaterial;thickness=$_.thickness;sourceDxf=$_.sourceDxf}})}}
+    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;dxfIndexedCount=$diag.dxfCount;dxfStatus=$dxfStatus;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot;parts=@($script:INDEX|ForEach-Object{[pscustomobject]@{partName=$_.partName;embeddedPartName=$_.embeddedPartName;fileType=$_.fileType;file=$_.file;likelyMaterial=$_.likelyMaterial;thickness=$_.thickness;sourceDxf=$_.sourceDxf}})}}
+  }
+  if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
+    $status=Get-DxfStatus
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;started=$status.started;finished=$status.finished;currentPath=[string]$status.currentPath}}
   }
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
     $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
     $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
     if(-not $script:INDEX -or $script:INDEX.Count -eq 0 -or [string]$CFG.libraryRoot -ne [string]$prsRoot -or [string]$CFG.dxfRoot -ne [string]$dxfRoot){
+      $dxfStatus=Start-DxfScan -root $dxfRoot
       Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot|Out-Null
+    }else{
+      $dxfStatus=Get-DxfStatus
+      if([string]$dxfStatus.root -ne [string]$dxfRoot -or [string]$dxfStatus.state -ne 'COMPLETE'){$dxfStatus=Start-DxfScan -root $dxfRoot}
     }
     $root=$prsRoot
     $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
@@ -354,9 +364,16 @@ function Handle-Request($req){
     foreach($p in @($b.parts)){
       $f=Find-Part -part ([string]$p.part)
       if(-not$f){
-        Set-Prop $p 'status' 'MISSING' | Out-Null
-        Set-Prop $p 'statusLabel' 'GEOMETRY MISSING' | Out-Null
-        Set-Prop $p 'reviewReason' 'No matching .PRS or .DXF was found in the geometry library' | Out-Null
+        $ds=Get-DxfStatus
+        if([string]$ds.root -eq [string]$dxfRoot -and [string]$ds.state -eq 'RUNNING'){
+          Set-Prop $p 'status' 'REVIEW' | Out-Null
+          Set-Prop $p 'statusLabel' 'DXF INDEXING' | Out-Null
+          Set-Prop $p 'reviewReason' 'DXF server index is still being built; rerun the build when indexing completes' | Out-Null
+        }else{
+          Set-Prop $p 'status' 'MISSING' | Out-Null
+          Set-Prop $p 'statusLabel' 'GEOMETRY MISSING' | Out-Null
+          Set-Prop $p 'reviewReason' 'No matching .PRS or .DXF was found in the geometry library' | Out-Null
+        }
         $parts+=$p
         continue
       }
