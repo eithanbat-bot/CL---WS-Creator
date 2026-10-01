@@ -2,6 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
+$BRIDGE_VERSION = '1.3.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CFG_FILE = Join-Path $ROOT 'config.json'
@@ -265,7 +266,7 @@ function Write-Job([string]$root,[string]$name,$parts){
 function Handle-Request($req){
   if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
   if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;libraryRoot=$CFG.libraryRoot;lastScan=$CFG.lastScan;count=[int]$CFG.count;discoveredFiles=[int]$CFG.discoveredFiles;sigmaNestCom=$true;bridge='PowerShell'}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG.libraryRoot;lastScan=$CFG.lastScan;count=[int]$CFG.count;discoveredFiles=[int]$CFG.discoveredFiles;sigmaNestCom=$true;bridge='PowerShell'}}
   }
   if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
     $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
