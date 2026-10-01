@@ -388,7 +388,11 @@ function Handle-Request($req){
       $variation=([string]$f.matchType -eq 'VARIATION')
 
       $reviewReason=''
-      if(-not $clMatKnown -or -not $clThkKnown){
+      if([bool]$p.clReview){
+        $status='REVIEW'
+        $label=[string]$p.clReviewReason
+        $reviewReason=[string]$(if($p.clReviewDetail){$p.clReviewDetail}else{'Conflicting CL values were kept separate and require confirmation'})
+      }elseif(-not $clMatKnown -or -not $clThkKnown){
         $status='REVIEW'
         $label='CL MATERIAL/THICKNESS MISSING'
         $reviewReason='CL material or thickness is missing'
