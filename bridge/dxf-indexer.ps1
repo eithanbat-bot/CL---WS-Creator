@@ -7,6 +7,18 @@ param(
 $ErrorActionPreference = 'Continue'
 $DXF_INDEXER_VERSION = '2.0.1'
 
+function Normalize-Key([string]$s){
+  if($null -eq $s){$s=''}
+  $s.ToUpperInvariant() -replace '[^A-Z0-9]',''
+}
+
+function Shard-Key([string]$part){
+  $n=Normalize-Key $part
+  if([string]::IsNullOrWhiteSpace($n)){return '__'}
+  if($n.Length -ge 2){return $n.Substring(0,2)}
+  return $n+'_'
+}
+
 function Write-Status($state,$message,$count,$errorCount,$started,$finished=$null,$current=''){
   $obj=[pscustomobject]@{
     state=$state
@@ -35,24 +47,25 @@ try{
     New-Item -ItemType Directory -Path $parent -Force|Out-Null
   }
 
-  $tmp=$IndexFile+'.tmp'
-  Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+  $shardFinal=Join-Path $parent 'dxf-index'
+  $shardTmp=Join-Path $parent 'dxf-index.tmp'
+  $manifestTmp=$IndexFile+'.tmp'
+  Remove-Item -LiteralPath $shardTmp -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $manifestTmp -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Path $shardTmp -Force|Out-Null
 
   $count=0
   $errors=0
   $directories=0
   $lastStatus=Get-Date
-  $lastHeartbeat=$lastStatus
+  $writers=New-Object 'System.Collections.Generic.Dictionary[string,object]'
 
   Write-Status 'RUNNING' 'DXF indexer started. Walking the DXF server recursively; progress is reported while folders are being visited.' 0 0 $started $null $Root
 
-  $writer=New-Object IO.StreamWriter($tmp,$false,[Text.Encoding]::UTF8)
+  $pending=New-Object 'System.Collections.Generic.Stack[string]'
+  $pending.Push($Root)
+
   try{
-    $writer.WriteLine(('PartName'+[char]9+'File'))
-
-    $pending=New-Object 'System.Collections.Generic.Stack[string]'
-    $pending.Push($Root)
-
     while($pending.Count -gt 0){
       $dir=$pending.Pop()
       $directories++
@@ -67,8 +80,19 @@ try{
         foreach($file in [IO.Directory]::EnumerateFiles($dir,'*.dxf',[IO.SearchOption]::TopDirectoryOnly)){
           $count++
           $partName=[IO.Path]::GetFileNameWithoutExtension($file)
-          $line=([string]$partName).Replace([char]9,' ')+[char]9+([string]$file).Replace([char]9,' ')
-          $writer.WriteLine($line)
+          $key=Shard-Key $partName
+          $writer=$null
+
+          if($writers.ContainsKey($key)){
+            $writer=$writers[$key]
+          }else{
+            $shardFile=Join-Path $shardTmp ($key+'.tsv')
+            $writer=New-Object IO.StreamWriter($shardFile,$false,[Text.Encoding]::UTF8)
+            $writer.WriteLine(('PartName'+[char]9+'File'))
+            $writers.Add($key,$writer)
+          }
+
+          $writer.WriteLine((([string]$partName).Replace([char]9,' ')+[char]9+([string]$file).Replace([char]9,' ')))
 
           $now=Get-Date
           if(($now-$lastStatus).TotalSeconds -ge 2 -or ($count % 250) -eq 0){
@@ -89,18 +113,34 @@ try{
       }
 
       $now=Get-Date
-      if(($now-$lastHeartbeat).TotalSeconds -ge 10){
-        $writer.Flush()
+      if(($now-$lastStatus).TotalSeconds -ge 10){
+        foreach($w in $writers.Values){try{$w.Flush()}catch{}}
         Write-Status 'RUNNING' ('Still scanning. '+$directories+' folders visited; '+$count+' DXF files indexed.') $count $errors $started $null $dir
-        $lastHeartbeat=$now
+        $lastStatus=$now
       }
     }
   }finally{
-    $writer.Flush()
-    $writer.Dispose()
+    foreach($w in $writers.Values){
+      try{$w.Flush();$w.Dispose()}catch{}
+    }
   }
 
-  Move-Item -LiteralPath $tmp -Destination $IndexFile -Force
+  if(Test-Path -LiteralPath $shardFinal){
+    Remove-Item -LiteralPath $shardFinal -Recurse -Force
+  }
+  Move-Item -LiteralPath $shardTmp -Destination $shardFinal -Force
+
+  $manifest=[ordered]@{
+    schema='cl-ws-creator/dxf-index/2'
+    indexerVersion=$DXF_INDEXER_VERSION
+    root=$Root
+    filesFound=[int]$count
+    errors=[int]$errors
+    generatedUtc=(Get-Date).ToUniversalTime().ToString('o')
+    shardDirectory=[IO.Path]::GetFileName($shardFinal)
+  }
+  ($manifest|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $manifestTmp -Encoding UTF8
+  Move-Item -LiteralPath $manifestTmp -Destination $IndexFile -Force
 
   $finished=(Get-Date).ToUniversalTime().ToString('o')
   Write-Status 'COMPLETE' ('DXF index complete: '+$count+' file(s) across '+$directories+' folder(s).') $count $errors $started $finished $Root
