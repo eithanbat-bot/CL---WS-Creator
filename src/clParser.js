@@ -65,8 +65,9 @@
     const map=new Map();
     for(const r of rows){
       if(r.status!=='READY')continue;
-      // Consolidate the same part/material/thickness across every selected CL sheet.
-      // Keep material and thickness in the key so different material variants are not merged.
+      // Same part + same material + same thickness consolidates normally.
+      // A part appearing with different material or thickness remains separate,
+      // and is explicitly flagged so the build/review step cannot combine it silently.
       const key=[normalize(r.part).toUpperCase(),normalizeMaterial(r.material).toUpperCase(),normalize(r.thickness).toUpperCase()].join('|');
       if(!map.has(key))map.set(key,{...r,sourceSheets:[r.sheet],sourceRows:[r.sourceRow]});
       else{
@@ -76,8 +77,29 @@
         x.sourceRows.push(r.sourceRow);
       }
     }
-    return [...map.values()];
+
+    const groups=[...map.values()];
+    const byPart=new Map();
+    for(const x of groups){
+      const partKey=normalize(x.part).toUpperCase();
+      if(!byPart.has(partKey))byPart.set(partKey,[]);
+      byPart.get(partKey).push(x);
+    }
+
+    for(const items of byPart.values()){
+      const materialKeys=[...new Set(items.map(x=>normalizeMaterial(x.material).toUpperCase()))].filter(Boolean);
+      const thicknessKeys=[...new Set(items.map(x=>normalize(x.thickness).toUpperCase()))].filter(Boolean);
+      if(materialKeys.length>1){
+        const detail='CL contains this part with multiple materials; quantities were not combined.';
+        items.forEach(x=>{x.clReview=true;x.clReviewReason='CL MATERIAL VARIANTS';x.clReviewDetail=detail;});
+      }else if(thicknessKeys.length>1){
+        const detail='CL contains this part with multiple thicknesses; quantities were not combined.';
+        items.forEach(x=>{x.clReview=true;x.clReviewReason='CL THICKNESS VARIANTS';x.clReviewDetail=detail;});
+      }
+    }
+    return groups;
   }
+
   window.CLParser={parseSheet,consolidate,findColumn,normalizeMaterial,thicknessFromMaterial,parseJobNumber,sheetBatchMultiplier,clean};
 })();
 
