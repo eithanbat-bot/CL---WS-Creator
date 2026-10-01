@@ -1,8 +1,11 @@
-/* global Office, Excel, CLParser */
-var BRIDGE='http://127.0.0.1:17832', sheets=[];
+/* global Office, XLSX, CLParser */
+var BRIDGE='http://127.0.0.1:17832';
+var clFile=null, clWorkbook=null, sheets=[];
+
 function $(id){return document.getElementById(id)}
-function esc(v){return String(v||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function pill(t,k){$('statusPill').textContent=t;$('statusPill').className='pill '+(k||'neutral')}
+
 async function bridge(path,opts){
   opts=opts||{};
   var r=await fetch(BRIDGE+path,{
@@ -15,43 +18,141 @@ async function bridge(path,opts){
   if(!r.ok)throw new Error(d.error||('Bridge request failed: '+r.status));
   return d;
 }
-async function loadSheets(){
-  await Excel.run(async function(ctx){
-    var all=ctx.workbook.worksheets;all.load('items/name');await ctx.sync();
-    sheets=all.items.map(function(x,i){return {name:x.name,index:i,selected:/^BAT/i.test(x.name)}})
-  });
-  renderSheets()
+
+function setBuildEnabled(enabled){
+  $('preview').disabled=!enabled;
+  $('build').disabled=!enabled;
+  $('refreshSheets').disabled=!enabled;
 }
+
+function clearResults(){
+  $('resultTable').querySelector('tbody').innerHTML='';
+  $('partsFound').textContent='0';
+  $('geometryFound').textContent='0';
+  $('geometryMissing').textContent='0';
+  $('totalQty').textContent='0';
+}
+
+function resetCL(){
+  clFile=null;
+  clWorkbook=null;
+  sheets=[];
+  $('clFile').value='';
+  $('clFileName').textContent='No CL workbook selected.';
+  $('clFileStatus').textContent='Select the cutting-list .xlsx/.xls file from this PC.';
+  $('sheetList').innerHTML='Choose a CL workbook first.';
+  $('sheetList').className='sheetList empty';
+  $('sheetCount').textContent='0 selected';
+  $('jobName').value='';
+  $('buildStatus').textContent='Choose a CL workbook to begin.';
+  $('clearCL').disabled=true;
+  setBuildEnabled(false);
+  clearResults();
+  pill('Connected','ok');
+}
+
 function renderSheets(){
-  var box=$('sheetList');box.innerHTML='';box.className='sheetList';
+  var box=$('sheetList');
+  box.innerHTML='';
+  box.className='sheetList';
+  if(!sheets.length){
+    box.className='sheetList empty';
+    box.textContent='No worksheets were found in this workbook.';
+    $('sheetCount').textContent='0 selected';
+    setBuildEnabled(false);
+    return;
+  }
   sheets.forEach(function(s,i){
-    var row=document.createElement('label');row.className='sheetItem';
+    var row=document.createElement('label');
+    row.className='sheetItem';
     row.innerHTML='<input type="checkbox" data-index="'+i+'" '+(s.selected?'checked':'')+'> <span>'+esc(s.name)+'</span>';
-    box.appendChild(row)
+    box.appendChild(row);
   });
-  updateCount()
+  updateCount();
+  setBuildEnabled(true);
 }
-function updateCount(){$('sheetCount').textContent=$('sheetList').querySelectorAll('input:checked').length+' selected'}
+
+function updateCount(){
+  var n=$('sheetList').querySelectorAll('input:checked').length;
+  $('sheetCount').textContent=n+' selected';
+  $('preview').disabled=!clWorkbook||n===0;
+  $('build').disabled=!clWorkbook||n===0;
+}
+
+function parseCLFile(file){
+  return new Promise(function(resolve,reject){
+    if(!window.XLSX)return reject(new Error('The Excel file parser did not load. Refresh the add-in and try again.'));
+    var reader=new FileReader();
+    reader.onerror=function(){reject(new Error('Could not read the selected CL workbook.'))};
+    reader.onload=function(evt){
+      try{
+        var wb=XLSX.read(evt.target.result,{type:'array',cellDates:false,cellNF:false,cellStyles:false});
+        var parsed=wb.SheetNames.map(function(name){
+          var ws=wb.Sheets[name];
+          var values=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true,blankrows:true});
+          return {name:name,values:values,selected:/^BAT/i.test(name)};
+        });
+        resolve({file:file,sheets:parsed});
+      }catch(e){reject(new Error('The selected file could not be parsed as an Excel workbook: '+e.message))}
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function chooseCL(file){
+  if(!file)return;
+  $('clFileStatus').textContent='Reading '+file.name+'...';
+  $('clFileName').textContent=file.name;
+  pill('Reading CL','neutral');
+  try{
+    clFile=file;
+    clWorkbook=await parseCLFile(file);
+    sheets=clWorkbook.sheets;
+    $('clearCL').disabled=false;
+    renderSheets();
+
+    var batCount=sheets.filter(function(s){return s.selected}).length;
+    var job='';
+    for(var i=0;i<sheets.length&&!job;i++)job=CLParser.parseJobNumber(sheets[i].values);
+    if(!$('jobName').value.trim()&&job)$('jobName').value=job;
+
+    $('clFileStatus').textContent=sheets.length+' worksheet(s) loaded. '+batCount+' BAT worksheet(s) preselected.';
+    $('buildStatus').textContent=batCount?'Select/confirm the CL sheets, then Preview CL or Create SigmaNEST Job.':'No BAT sheets were found; select the required worksheet(s) manually.';
+    pill('CL loaded','ok');
+  }catch(e){
+    resetCL();
+    $('clFileName').textContent=file.name;
+    $('clFileStatus').textContent=e.message;
+    pill('CL load failed','bad');
+  }
+}
+
+async function loadSheets(){
+  if(!clFile){resetCL();return}
+  await chooseCL(clFile);
+}
+
+function selectedSheets(){
+  return [].slice.call($('sheetList').querySelectorAll('input:checked')).map(function(x){return sheets[Number(x.dataset.index)]});
+}
+
 async function readCL(){
-  var selected=[].slice.call($('sheetList').querySelectorAll('input:checked')).map(function(x){return sheets[Number(x.dataset.index)]});
+  if(!clWorkbook)throw new Error('Choose a CL workbook first.');
+  var selected=selectedSheets();
   if(!selected.length)throw new Error('Select at least one CL sheet.');
   var all=[],job='';
-  await Excel.run(async function(ctx){
-    var refs=selected.map(function(s){return ctx.workbook.worksheets.getItem(s.name)});
-    refs.forEach(function(ws,i){var used=ws.getUsedRangeOrNullObject(true);used.load('values,isNullObject');selected[i].used=used});
-    await ctx.sync();
-    selected.forEach(function(s){
-      if(!s.used.isNullObject){
-        all=all.concat(CLParser.parseSheet(s.used.values,{sheet:s.name}));
-        job=job||CLParser.parseJobNumber(s.used.values)
-      }
-    })
+  selected.forEach(function(s){
+    all=all.concat(CLParser.parseSheet(s.values,{sheet:s.name}));
+    job=job||CLParser.parseJobNumber(s.values);
   });
   if(!$('jobName').value.trim()&&job)$('jobName').value=job;
-  return CLParser.consolidate(all)
+  if(!all.length)throw new Error('No usable CL part rows were found in the selected worksheets.');
+  return CLParser.consolidate(all);
 }
+
 function showParts(parts,statusMode){
-  var body=$('resultTable').querySelector('tbody');body.innerHTML='';
+  var body=$('resultTable').querySelector('tbody');
+  body.innerHTML='';
   $('partsFound').textContent=parts.length;
   $('totalQty').textContent=parts.reduce(function(a,x){return a+x.qty},0);
   parts.forEach(function(p){
@@ -59,39 +160,77 @@ function showParts(parts,statusMode){
     var st=statusMode==='preview'?'—':(p.statusLabel||p.status||'');
     var cls=p.status==='READY'?'okText':(p.status==='REVIEW'?'warnText':'badText');
     tr.innerHTML='<td>'+esc(p.part)+'</td><td>'+p.qty+'</td><td>'+esc(p.material)+'</td><td>'+esc(p.thickness)+'</td><td class="'+cls+'">'+esc(st)+'</td>';
-    body.appendChild(tr)
-  })
+    body.appendChild(tr);
+  });
 }
-async function preview(){try{var p=await readCL();showParts(p,'preview');$('buildStatus').textContent=p.length+' consolidated CL lines ready.';pill('CL ready','ok')}catch(e){$('buildStatus').textContent=e.message;pill('CL error','bad')}}
+
+async function preview(){
+  try{
+    var p=await readCL();
+    showParts(p,'preview');
+    $('geometryFound').textContent='—';
+    $('geometryMissing').textContent='—';
+    $('buildStatus').textContent=p.length+' consolidated CL lines ready.';
+    pill('CL ready','ok');
+  }catch(e){
+    $('buildStatus').textContent=e.message;
+    pill('CL error','bad');
+  }
+}
+
 async function scan(){
   try{
-    var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';$('libraryPath').value=root;
+    var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
+    $('libraryPath').value=root;
     var r=await bridge('/api/scan',{method:'POST',body:JSON.stringify({root:root})});
-    $('libraryStatus').textContent=r.count+' .PRS files indexed.';pill('Library ready','ok')
-  }catch(e){$('libraryStatus').textContent=e.message;pill('Bridge offline','bad')}
+    $('libraryStatus').textContent=r.count+' .PRS files indexed.';
+    pill('Library ready','ok');
+  }catch(e){
+    $('libraryStatus').textContent=e.message;
+    pill('Bridge offline','bad');
+  }
 }
+
 async function build(){
   try{
-    var parts=await readCL(),root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS',job=$('jobName').value.trim()||('CL_'+Date.now());
+    var parts=await readCL();
+    var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
+    var job=$('jobName').value.trim()||('CL_'+Date.now());
     var r=await bridge('/api/build-job',{method:'POST',body:JSON.stringify({jobName:job,libraryRoot:root,parts:parts})});
     showParts(r.parts,'built');
     $('geometryFound').textContent=r.parts.filter(function(x){return x.status==='READY'}).length;
     $('geometryMissing').textContent=r.parts.filter(function(x){return x.status!=='READY'}).length;
     $('buildStatus').textContent=r.wsPath?(r.message+'\nWS: '+r.wsPath):r.message;
-    pill(r.reviewCount?'Review required':'SigmaNEST WS ready',r.reviewCount?'warn':'ok')
-  }catch(e){$('buildStatus').textContent=e.message;pill('Build failed','bad')}
+    pill(r.reviewCount?'Review required':'SigmaNEST WS ready',r.reviewCount?'warn':'ok');
+  }catch(e){
+    $('buildStatus').textContent=e.message;
+    pill('Build failed','bad');
+  }
 }
+
 Office.onReady(async function(info){
   if(info.host!==Office.HostType.Excel){pill('Excel only','bad');return}
-  $('refreshSheets').onclick=loadSheets;$('scanLibrary').onclick=scan;$('preview').onclick=preview;$('build').onclick=build;
+
+  $('chooseCL').onclick=function(){$('clFile').click()};
+  $('clFile').onchange=function(){chooseCL(this.files&&this.files[0])};
+  $('clearCL').onclick=resetCL;
+  $('refreshSheets').onclick=loadSheets;
+  $('preview').onclick=preview;
+  $('scanLibrary').onclick=scan;
+  $('build').onclick=build;
   $('sheetList').onchange=updateCount;
+
   $('libraryPath').value=localStorage.getItem('clwsc_libraryRoot')||'S:\\SNDataX1\\PARTS';
   $('libraryPath').onchange=function(){localStorage.setItem('clwsc_libraryRoot',$('libraryPath').value.trim())};
+
   try{
     var h=await bridge('/api/health');
-    $('libraryStatus').textContent='Bridge connected. Library: '+h.libraryRoot;pill('Connected','ok')
+    $('libraryStatus').textContent='Bridge connected. Library: '+h.libraryRoot;
+    pill('Connected','ok');
   }catch(e){
-    $('libraryStatus').textContent='Start start-bridge.bat on this PC.';pill('Bridge offline','warn')
+    $('libraryStatus').textContent='Start start-bridge.bat on this PC.';
+    pill('Bridge offline','warn');
   }
-  await loadSheets()
+
+  resetCL();
 });
