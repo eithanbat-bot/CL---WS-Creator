@@ -65,4 +65,20 @@ jobs:
             throw 'start-bridge.bat is missing the local syntax preflight.'
           }
 
+          if ($server -notmatch "Get-ChildItem -LiteralPath \$root -Recurse -File") {
+            throw 'Server scan is not recursive.'
+          }
+
+          if ($server -notmatch "Extension -ieq '\.prs' -or \$_.Extension -ieq '\.dxf'") {
+            throw 'Server scan is not indexing both PRS and DXF files.'
+          }
+
+          if ($server -notmatch "FOUND - DXF") {
+            throw 'Server build path is missing DXF-ready status handling.'
+          }
+
+          if ($creator -notmatch "sourceType") {
+            throw 'SigmaNEST creator does not receive sourceType.'
+          }
+
           Write-Host 'Build-path hazard checks: OK' -ForegroundColor Green
