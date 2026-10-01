@@ -80,11 +80,11 @@ function Read-HttpRequest($client) {
   [pscustomobject]@{ Method=$requestLine[0]; Path=($requestLine[1] -split '\?')[0]; Body=$body; Headers=$headers }
 }
 
-function Get-Strings8 { param([byte[]]$b) {
+function Get-Strings8 { param([byte[]]$b)
   $s = [Text.Encoding]::ASCII.GetString($b)
   [regex]::Matches($s,'[\x20-\x7E]{4,}') | ForEach-Object {$_.Value}
 }
-function Get-Strings16 { param([byte[]]$b) {
+function Get-Strings16 { param([byte[]]$b)
   $s = [Text.Encoding]::Unicode.GetString($b)
   [regex]::Matches($s,'[\x20-\x7E]{4,}') | ForEach-Object {$_.Value}
 }
@@ -138,12 +138,12 @@ function Material-Equal { param([string]$a,[string]$b){
   return ($A.Contains($B) -or $B.Contains($A))
 }
 function Sigma-Material { param([string]$cl,[string]$lib){
-  $s=Normalize-Material $(if($lib){$lib}else{$cl})
+  $s=Normalize-Material -s ([string]$(if($lib){$lib}else{$cl}))
   $s=$s -replace '^\d+(?:\.\d+)?\s*mm\s*',''
   $s=$s -replace '\s+(sheet|plate)$',''
   $s.Trim()
 }
-function Scan-Library { param([string]$root) {
+function Scan-Library { param([string]$root)
   if(-not(Test-Path -LiteralPath $root)){throw "Cannot access the PRS library folder: $root"}
   if(-not((Get-Item -LiteralPath $root).PSIsContainer)){throw "Library path is not a folder: $root"}
 
@@ -175,7 +175,7 @@ function Scan-Library { param([string]$root) {
   foreach($item in $items){
     $nk=Normalize -s $item.partName
     if($nk){ if(-not $script:BYNAME.ContainsKey($nk)){$script:BYNAME[$nk]=@()}; $script:BYNAME[$nk]+=$item }
-    $vk=VariationKey $item.partName
+    $vk=VariationKey -s $item.partName
     if($vk){ if(-not $script:BYVAR.ContainsKey($vk)){$script:BYVAR[$vk]=@()}; $script:BYVAR[$vk]+=$item }
   }
   $CFG.libraryRoot=$root
@@ -194,17 +194,17 @@ function Scan-Library { param([string]$root) {
   }
 }
 
-function Ensure-Metadata { param($item) {
+function Ensure-Metadata { param($item)
   if($item.metadataLoaded){return $item}
   try{
     $meta=Inspect-Prs ([string]$item.file)
     foreach($p in $meta.PSObject.Properties){
       Set-Prop -obj $item -name ([string]$p.Name) -value $p.Value | Out-Null
     }
-    Set-Prop $item 'metadataLoaded' $true | Out-Null
+    Set-Prop -obj $item -name 'metadataLoaded' -value $true | Out-Null
   }catch{
     $item|Add-Member NoteProperty metadataLoaded $true -Force
-    Set-Prop $item 'metadataError' $_.Exception.Message | Out-Null
+    Set-Prop -obj $item -name 'metadataError' -value $_.Exception.Message | Out-Null
   }
   return $item
 }
