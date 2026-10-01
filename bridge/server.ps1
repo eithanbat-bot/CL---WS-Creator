@@ -166,8 +166,24 @@ function Get-DxfStatus(){
   try{return (Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json)}catch{return [pscustomobject]@{state='UNKNOWN';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='Could not read DXF index status.'}}
 }
 
+function Stop-RunningDxfWorkers([string]$root){
+  try{
+    $rootPattern=[regex]::Escape($root)
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.ProcessId -ne $PID -and
+        ([string]$_.CommandLine -match 'dxf-indexer\.ps1') -and
+        ([string]$_.CommandLine -match $rootPattern)
+      } |
+      ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      }
+  }catch{}
+}
+
 function Start-DxfScan([string]$root){
   $status=Get-DxfStatus
+  Stop-RunningDxfWorkers -root $root
   $requiredIndexerVersion='2.0.1'
 
   if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'RUNNING'){
