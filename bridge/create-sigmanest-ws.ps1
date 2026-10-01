@@ -14,11 +14,28 @@ function Invoke-ComMethod($obj,[string]$name,[object[]]$args=@()){
   )
 }
 
+function Try-Set($obj,[string[]]$names,$value){
+  if($null -eq $obj){return $null}
+  foreach($name in $names){
+    if([string]::IsNullOrWhiteSpace($name)){continue}
+    try{
+      $obj.$name=$value
+      return $name
+    }catch{}
+  }
+  return $null
+}
+
+function Set-Required($obj,[string[]]$names,$value,[string]$label){
+  $set=Try-Set -obj $obj -names $names -value $value
+  if(-not $set){
+    throw ('SigmaNEST part does not expose a writable '+$label+' property. Tried: '+($names -join ', '))
+  }
+  return $set
+}
+
 function Safe-Set($obj,[string]$name,$value){
-  if($null -eq $obj -or [string]::IsNullOrWhiteSpace($name)){return}
-  try{
-    $obj.$name=$value
-  }catch{}
+  [void](Try-Set -obj $obj -names @($name) -value $value)
 }
 
 function Get-PartsCount($app){
@@ -121,19 +138,30 @@ try{
 
     $part=Add-GeometryToWorkspace $app $sourcePath $sourceType
 
-    # Apply CL-controlled values where the corresponding SigmaNEST fields exist.
-    Safe-Set $part 'QtyToNest' ([int][math]::Round([double]$x.qty))
-    if($x.sigmaMaterial){Safe-Set $part 'Material' ([string]$x.sigmaMaterial)}
-    if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){Safe-Set $part 'Thickness' ([double]$x.thicknessMm)}
+    # Quantity is known from the SigmaNEST X1.4 part interface as BatchQty.
+    # Do not silently ignore a failed assignment: an incorrect WS is worse than
+    # stopping the build for review.
+    $quantity=[int][math]::Round([double]$x.qty)
+    $quantityProperty=Set-Required -obj $part -names @('BatchQty','QtyToNest','Quantity','Qty') -value $quantity -label 'quantity'
+    $materialProperty=$null
+    if($x.sigmaMaterial){
+      $materialProperty=Set-Required -obj $part -names @('Material') -value ([string]$x.sigmaMaterial) -label 'material'
+    }
+    $thicknessProperty=$null
+    if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){
+      $thicknessProperty=Set-Required -obj $part -names @('Thickness','SheetThickness','Thk') -value ([double]$x.thicknessMm) -label 'thickness'
+    }
     Safe-Set $part 'WONumber' $safe
     Safe-Set $part 'DrawingNumber' ([string]$x.part)
 
     $created += [pscustomobject]@{
-      part=$part.Name
-      qty=$part.QtyToNest
-      material=$part.Material
-      thickness=$part.Thickness
-      path=$part.Path
+      part=$(try{[string]$part.Name}catch{[string]$x.part})
+      qty=$quantity
+      material=$(try{[string]$part.Material}catch{[string]$x.sigmaMaterial})
+      thickness=$(try{[string]$part.Thickness}catch{[string]$x.thicknessMm})
+      quantityProperty=$quantityProperty
+      materialProperty=$materialProperty
+      thicknessProperty=$thicknessProperty
       sourcePath=$sourcePath
       sourceType=$sourceType
       batchMultiplier=$x.batchMultiplier
