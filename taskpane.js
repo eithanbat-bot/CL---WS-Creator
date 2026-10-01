@@ -393,3 +393,85 @@ async function scan(){
   }
 }
 
+async function build(){
+  var btn=$('build');
+  btn.disabled=true;
+  pill('Building job','neutral');
+  $('buildStatus').textContent='Matching geometry and building the SigmaNEST job...';
+  try{
+    var parts=await readCL();
+    var selectedNames=selectedSheets().map(function(s){return s.name});
+    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
+    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
+    var job=$('jobName').value.trim()||'CL_JOB';
+    var r=await bridge('/api/build-job',{
+      method:'POST',
+      timeoutMs:600000,
+      body:JSON.stringify({prsRoot:prsRoot,dxfRoot:dxfRoot,jobName:job,parts:parts})
+    });
+    var out=r.parts||[];
+    showParts(out,'build');
+    var ready=out.filter(function(x){return x.status==='READY'}).length;
+    $('geometryFound').textContent=ready;
+    $('geometryMissing').textContent=out.length-ready;
+    var msg=r.message||'Job staged.';
+    try{
+      await writeReportSheets(r,job,selectedNames);
+      msg+=' Summary and Part Review sheets written to this workbook.';
+    }catch(e){
+      msg+=' (Could not write report sheets: '+e.message+')';
+    }
+    $('buildStatus').textContent=msg;
+    pill(r.reviewCount?'Review required':'Job created',r.reviewCount?'warn':'ok');
+  }catch(e){
+    $('buildStatus').textContent=e.message;
+    pill('Build error','bad');
+  }finally{
+    updateCount();
+  }
+}
+
+/* Checks the local bridge, never hangs: always ends on a clear status. */
+async function checkBridge(){
+  try{
+    var h=await bridge('/api/health',{timeoutMs:4000});
+    pill('Bridge connected','ok');
+    var v=$('bridgeVersion'); if(v)v.textContent='Local bridge '+(h.bridgeVersion||'')+' at 127.0.0.1:17832';
+    return true;
+  }catch(e){
+    pill('Bridge not running','bad');
+    $('buildStatus').textContent='The local bridge is not running. Start start-bridge.bat on this PC, then click Retry. ('+e.message+')';
+    return false;
+  }
+}
+
+function init(){
+  try{
+    $('libraryPath').value=localStorage.getItem('clwsc_prsRoot')||'S:\\SNDataX1\\PARTS';
+    $('dxfPath').value=localStorage.getItem('clwsc_dxfRoot')||'Y:\\';
+  }catch(e){
+    $('libraryPath').value='S:\\SNDataX1\\PARTS';
+    $('dxfPath').value='Y:\\';
+  }
+  $('chooseCL').addEventListener('click',function(){$('clFile').click()});
+  $('clFile').addEventListener('change',function(){chooseCL($('clFile').files[0])});
+  $('clearCL').addEventListener('click',resetCL);
+  $('refreshSheets').addEventListener('click',loadSheets);
+  $('sheetList').addEventListener('change',updateCount);
+  $('scanLibrary').addEventListener('click',scan);
+  $('preview').addEventListener('click',preview);
+  $('build').addEventListener('click',build);
+  $('statusPill').addEventListener('click',checkBridge);
+  setBuildEnabled(false);
+  pill('Starting...','neutral');
+  checkBridge();
+}
+
+/* Start even if office.js fails to load or never calls back (e.g. opened in a browser). */
+var started=false;
+function startOnce(){ if(started)return; started=true; init(); }
+window.addEventListener('error',function(ev){
+  try{ if(!started) pill('Script error','bad'); $('buildStatus').textContent='Script error: '+ev.message; }catch(e){}
+});
+if(window.Office&&Office.onReady){ Office.onReady(function(){startOnce()}); }
+window.setTimeout(startOnce,2500);
