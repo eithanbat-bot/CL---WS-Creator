@@ -324,7 +324,35 @@ async function preview(){
   }
 }
 
-var dxfMonitorTimer=null;,,function monitorDxfIndex(root){,  if(dxfMonitorTimer)window.clearInterval(dxfMonitorTimer);,  async function check(){,    try{,      var st=await bridge('/api/dxf-status');,      if(String(st.root||'')!==String(root)){return},      if(st.state==='RUNNING'){,        $('libraryStatus').textContent='DXF indexing in progress under '+root+' — '+(st.filesFound||0)+' DXF files indexed so far.'+(st.currentPath?' Current: '+st.currentPath:'');,        pill('DXF indexing','neutral');,      }else if(st.state==='COMPLETE'){,        $('libraryStatus').textContent=(st.filesFound||0)+' .DXF files indexed recursively under '+root+'. PRS library is indexed separately.';,        pill('Libraries ready','ok');,        if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null},      }else if(st.state==='FAILED'){,        $('libraryStatus').textContent='DXF indexing failed: '+(st.message||'Unknown error');,        pill('DXF index failed','bad');,        if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null},      },    }catch(e){},  },  check();,  dxfMonitorTimer=window.setInterval(check,3000);,},async function scan(){
+var dxfMonitorTimer=null;
+
+function monitorDxfIndex(root){
+  if(dxfMonitorTimer)window.clearInterval(dxfMonitorTimer);
+  async function check(){
+    try{
+      var st=await bridge('/api/dxf-status');
+      if(String(st.root||'')!==String(root))return;
+      if(st.state==='RUNNING'){
+        $('libraryStatus').textContent='DXF indexing in progress under '+root+' — '+(st.filesFound||0)+' DXF files indexed so far.'+(st.currentPath?' Current: '+st.currentPath:'');
+        pill('DXF indexing','neutral');
+      }else if(st.state==='COMPLETE'){
+        $('libraryStatus').textContent=(st.filesFound||0)+' .DXF files indexed recursively under '+root+'. PRS library is indexed separately.';
+        pill('Libraries ready','ok');
+        if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null;}
+      }else if(st.state==='FAILED'){
+        $('libraryStatus').textContent='DXF indexing failed: '+(st.message||'Unknown error');
+        pill('DXF index failed','bad');
+        if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null;}
+      }
+    }catch(e){
+      /* Keep polling while the bridge remains temporarily unavailable. */
+    }
+  }
+  check();
+  dxfMonitorTimer=window.setInterval(check,3000);
+}
+
+async function scan(){
   var btn=$('scanLibrary');
   var started=Date.now();
   btn.disabled=true;
@@ -365,71 +393,3 @@ var dxfMonitorTimer=null;,,function monitorDxfIndex(root){,  if(dxfMonitorTimer)
   }
 }
 
-async function build(){
-  var btn=$('build');
-  btn.disabled=true;
-  $('preview').disabled=true;
-  $('buildStatus').textContent='Preparing '+$('jobName').value.trim()+'...';
-  pill('Creating job','neutral');
-  try{
-    var parts=await readCL();
-    $('buildStatus').textContent='Matching '+parts.length+' CL lines against the PRS + DXF server libraries...';
-    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
-    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
-    var job=$('jobName').value.trim()||('CL_'+Date.now());
-    $('buildStatus').textContent='Building '+job+' — please leave the bridge window open...';
-    var r=await bridge('/api/build-job',{
-      method:'POST',
-      body:JSON.stringify({jobName:job,prsRoot:prsRoot,dxfRoot:dxfRoot,libraryRoot:prsRoot,parts:parts}),
-      timeoutMs:300000
-    });
-    showParts(r.parts,'built');
-    try{await writeReportSheets(r,job,selectedSheets().map(function(x){return x.name}))}catch(reportErr){$('buildStatus').textContent='Job processed, but Excel report sheets could not be updated: '+reportErr.message;}
-    $('geometryFound').textContent=r.parts.filter(function(x){return x.status==='READY'}).length;
-    $('geometryMissing').textContent=r.parts.filter(function(x){return x.status!=='READY'}).length;
-    if(r.wsPath){
-      $('buildStatus').textContent=r.message+'\nWS: '+r.wsPath;
-    }else{
-      var breakdown=r.reviewBreakdown||{};
-      var details=Object.keys(breakdown).map(function(k){return k+': '+breakdown[k]}).join(' | ');
-      $('buildStatus').textContent=details?r.message+'\n'+details:r.message;
-    }
-    pill(r.reviewCount?'Review required':'SigmaNEST WS ready',r.reviewCount?'warn':'ok');
-  }catch(e){
-    $('buildStatus').textContent=e.message;
-    pill(e.message.indexOf('did not finish')>=0?'Build timeout':'Build failed','bad');
-  }finally{
-    btn.disabled=false;
-    updateCount();
-  }
-}
-
-Office.onReady(async function(info){
-  if(info.host!==Office.HostType.Excel){pill('Excel only','bad');return}
-
-  $('chooseCL').onclick=function(){$('clFile').click()};
-  $('clFile').onchange=function(){chooseCL(this.files&&this.files[0])};
-  $('clearCL').onclick=resetCL;
-  $('refreshSheets').onclick=loadSheets;
-  $('preview').onclick=preview;
-  $('scanLibrary').onclick=scan;
-  $('build').onclick=build;
-  $('sheetList').onchange=updateCount;
-
-  $('libraryPath').value=localStorage.getItem('clwsc_prsRoot')||'S:\\SNDataX1\\PARTS';
-  $('dxfPath').value=localStorage.getItem('clwsc_dxfRoot')||'Y:\\';
-  $('libraryPath').onchange=function(){localStorage.setItem('clwsc_prsRoot',$('libraryPath').value.trim())};
-  $('dxfPath').onchange=function(){localStorage.setItem('clwsc_dxfRoot',$('dxfPath').value.trim())};
-
-  resetCL();
-
-  try{
-    var h=await bridge('/api/health');
-    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). PRS root: '+(h.libraryRoot||'')+' | DXF root: '+(h.dxfRoot||'')+(h.prsCount!=null?' | PRS '+h.prsCount+' | DXF index '+(h.dxfIndexState||'IDLE'):'');
-    pill('Connected','ok');
-    if(h.dxfIndexState==='RUNNING'&&h.dxfRoot)monitorDxfIndex(h.dxfRoot);
-  }catch(e){
-    $('libraryStatus').textContent='Start start-bridge.bat on this PC.';
-    pill('Bridge offline','warn');
-  }
-});
