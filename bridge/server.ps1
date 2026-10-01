@@ -168,13 +168,37 @@ function Start-DxfScan([string]$root){
   if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'RUNNING'){return $status}
   if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'COMPLETE' -and (Test-Path -LiteralPath $DXF_INDEX_FILE)){return $status}
   if(-not(Test-Path -LiteralPath $DXF_SCAN_SCRIPT)){return [pscustomobject]@{state='FAILED';root=$root;filesFound=0;errors=1;message='DXF indexer script is missing: '+$DXF_SCAN_SCRIPT}}
+
   try{
-    Remove-Item -LiteralPath $DXF_STATUS_FILE -Force -ErrorAction SilentlyContinue
+    # Publish RUNNING before launching the worker. This removes the startup race
+    # where the API could report IDLE for the first few hundred milliseconds.
+    $started=(Get-Date).ToUniversalTime().ToString('o')
+    $starting=[pscustomobject]@{
+      state='RUNNING'
+      root=$root
+      message='DXF indexing worker is starting.'
+      filesFound=0
+      errors=0
+      started=$started
+      finished=$null
+      currentPath=$root
+      pid=$null
+    }
+    ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
+
     $args="-NoProfile -ExecutionPolicy Bypass -File `"$DXF_SCAN_SCRIPT`" -Root `"$root`" -IndexFile `"$DXF_INDEX_FILE`" -StatusFile `"$DXF_STATUS_FILE`""
-    Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WindowStyle Hidden | Out-Null
-    Start-Sleep -Milliseconds 200
-    return Get-DxfStatus
-  }catch{return [pscustomobject]@{state='FAILED';root=$root;filesFound=0;errors=1;message=$_.Exception.Message}}
+    $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WindowStyle Hidden -PassThru
+    try{
+      $starting.pid=$proc.Id
+      ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
+    }catch{}
+
+    return $starting
+  }catch{
+    $failed=[pscustomobject]@{state='FAILED';root=$root;filesFound=0;errors=1;message=$_.Exception.Message}
+    try{($failed|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
+    return $failed
+  }
 }
 
 function Get-DxfIndexItems([string]$root){
