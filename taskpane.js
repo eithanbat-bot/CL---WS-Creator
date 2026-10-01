@@ -79,7 +79,8 @@ async function writeReportSheets(result,job,selectedSheetNames){
     ['Generated',now],
     ['CL workbook',clFile?clFile.name:''],
     ['Selected CL sheets',(selectedSheetNames||[]).join(', ')],
-    ['Geometry library root',$('libraryPath').value.trim()],
+    ['PRS geometry root',$('libraryPath').value.trim()],
+    ['DXF geometry root',$('dxfPath').value.trim()],
     ['',''],
     ['RESULT','VALUE'],
     ['Consolidated CL lines',parts.length],
@@ -95,7 +96,7 @@ async function writeReportSheets(result,job,selectedSheetNames){
     ['Ambiguous matches',review.filter(function(x){return String(x.statusLabel||'').indexOf('AMBIGUOUS')===0}).length],
     ['',''],
     ['ACTION / HAND-OFF','DETAIL'],
-    ['Geometry search','Recursive .PRS + .DXF search through the configured server folder and all subfolders'],
+    ['Geometry search','Recursive .PRS search under the PRS root and recursive .DXF search under the DXF root, including all subfolders'],
     ['SigmaNEST WS',result.wsPath||'Not created — review items remain'],
     ['Staging folder',result.outputDir||''],
     ['Part review sheet','See "Part Review" worksheet for every item requiring confirmation']
@@ -327,23 +328,27 @@ async function scan(){
   var btn=$('scanLibrary');
   var started=Date.now();
   btn.disabled=true;
-  $('libraryStatus').textContent='Scanning S:\\SNDataX1\\PARTS ...';
+  $('libraryStatus').textContent='Scanning PRS and DXF server folders recursively ...';
   pill('Scanning geometry','neutral');
   try{
-    var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
-    $('libraryPath').value=root;
-    var r=await bridge('/api/scan',{method:'POST',body:JSON.stringify({root:root})});
+    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
+    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
+    $('libraryPath').value=prsRoot;
+    $('dxfPath').value=dxfRoot;
+    localStorage.setItem('clwsc_prsRoot',prsRoot);
+    localStorage.setItem('clwsc_dxfRoot',dxfRoot);
+    var r=await bridge('/api/scan',{method:'POST',body:JSON.stringify({prsRoot:prsRoot,dxfRoot:dxfRoot})});
     var scanErrors=(r.scanErrors||[]).length, inspectErrors=(r.inspectErrors||[]).length;
     var elapsed=Math.round((Date.now()-started)/1000);
     if(!r.count && !r.discoveredFiles){
-      $('libraryStatus').textContent='No .PRS or .DXF geometry files were found in the selected folder tree. Scan completed in '+elapsed+'s.';
+      $('libraryStatus').textContent='No .PRS or .DXF geometry files were found in the selected server folders. Scan completed in '+elapsed+'s.';
       pill('No PRS files','warn');
     }else if(scanErrors||inspectErrors){
       var first=(r.scanErrors&&r.scanErrors[0])?(r.scanErrors[0].path+': '+r.scanErrors[0].error):(r.inspectErrors[0]?r.inspectErrors[0].path+': '+r.inspectErrors[0].error:'Unknown scan issue');
-      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(r.dxfCount||0)+' .DXF files indexed; '+(scanErrors+inspectErrors)+' issue(s). First: '+first+' ('+elapsed+'s)';
+      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(r.dxfCount||0)+' .DXF files indexed; '+(scanErrors+inspectErrors)+' issue(s). PRS: '+(r.prsRoot||prsRoot)+' | DXF: '+(r.dxfRoot||dxfRoot)+' | First: '+first+' ('+elapsed+'s)';
       pill('Library partial','warn');
     }else{
-      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(r.dxfCount||0)+' .DXF files indexed recursively in '+elapsed+'s.';
+      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS under '+(r.prsRoot||prsRoot)+' + '+(r.dxfCount||0)+' .DXF under '+(r.dxfRoot||dxfRoot)+' indexed recursively in '+elapsed+'s.';
       pill('Library ready','ok');
     }
   }catch(e){
@@ -362,13 +367,14 @@ async function build(){
   pill('Creating job','neutral');
   try{
     var parts=await readCL();
-    $('buildStatus').textContent='Matching '+parts.length+' CL lines against the PRS library...';
-    var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
+    $('buildStatus').textContent='Matching '+parts.length+' CL lines against the PRS + DXF server libraries...';
+    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
+    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
     var job=$('jobName').value.trim()||('CL_'+Date.now());
     $('buildStatus').textContent='Building '+job+' — please leave the bridge window open...';
     var r=await bridge('/api/build-job',{
       method:'POST',
-      body:JSON.stringify({jobName:job,libraryRoot:root,parts:parts}),
+      body:JSON.stringify({jobName:job,prsRoot:prsRoot,dxfRoot:dxfRoot,libraryRoot:prsRoot,parts:parts}),
       timeoutMs:300000
     });
     showParts(r.parts,'built');
@@ -404,14 +410,16 @@ Office.onReady(async function(info){
   $('build').onclick=build;
   $('sheetList').onchange=updateCount;
 
-  $('libraryPath').value=localStorage.getItem('clwsc_libraryRoot')||'S:\\SNDataX1\\PARTS';
-  $('libraryPath').onchange=function(){localStorage.setItem('clwsc_libraryRoot',$('libraryPath').value.trim())};
+  $('libraryPath').value=localStorage.getItem('clwsc_prsRoot')||'S:\\SNDataX1\\PARTS';
+  $('dxfPath').value=localStorage.getItem('clwsc_dxfRoot')||'Y:\\';
+  $('libraryPath').onchange=function(){localStorage.setItem('clwsc_prsRoot',$('libraryPath').value.trim())};
+  $('dxfPath').onchange=function(){localStorage.setItem('clwsc_dxfRoot',$('dxfPath').value.trim())};
 
   resetCL();
 
   try{
     var h=await bridge('/api/health');
-    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). Library: '+h.libraryRoot+(h.prsCount!=null?' | PRS '+h.prsCount+' | DXF '+(h.dxfCount||0):'');
+    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). Library: '+h.libraryRoot+(h.prsCount!=null?' | PRS root '+(h.libraryRoot||'')+' | DXF root '+(h.dxfRoot||'')+' | PRS '+h.prsCount+' | DXF '+(h.dxfCount||0):'');
     pill('Connected','ok');
   }catch(e){
     $('libraryStatus').textContent='Start start-bridge.bat on this PC.';
