@@ -244,7 +244,13 @@ async function build(){
     showParts(r.parts,'built');
     $('geometryFound').textContent=r.parts.filter(function(x){return x.status==='READY'}).length;
     $('geometryMissing').textContent=r.parts.filter(function(x){return x.status!=='READY'}).length;
-    $('buildStatus').textContent=r.wsPath?(r.message+'\nWS: '+r.wsPath):r.message;
+    if(r.wsPath){
+      $('buildStatus').textContent=r.message+'\nWS: '+r.wsPath;
+    }else{
+      var breakdown=r.reviewBreakdown||{};
+      var details=Object.keys(breakdown).map(function(k){return k+': '+breakdown[k]}).join(' | ');
+      $('buildStatus').textContent=details?r.message+'\n'+details:r.message;
+    }
     pill(r.reviewCount?'Review required':'SigmaNEST WS ready',r.reviewCount?'warn':'ok');
   }catch(e){
     $('buildStatus').textContent=e.message;
