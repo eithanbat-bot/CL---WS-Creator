@@ -41,13 +41,15 @@
   </section>
 
   <section class="card">
-    <div class="sectionTitle">3. Geometry Library</div>
-    <label for="libraryPath">Main server geometry folder (.PRS + .DXF)</label>
+    <div class="sectionTitle">3. Geometry Libraries</div>
+    <label for="libraryPath">Main .PRS server folder</label>
+    <input id="libraryPath" type="text" placeholder="S:\SNDataX1\PARTS">
+    <label for="dxfPath">Main .DXF server folder</label>
     <div class="row">
-      <input id="libraryPath" type="text" placeholder="S:\SNDataX1\PARTS">
-      <button id="scanLibrary" class="secondary" type="button">Scan</button>
+      <input id="dxfPath" type="text" placeholder="Y:\">
+      <button id="scanLibrary" class="secondary" type="button">Scan Both</button>
     </div>
-    <div id="libraryStatus" class="muted">The bridge searches this folder and all subfolders for .PRS and .DXF geometry.</div>
+    <div id="libraryStatus" class="muted">PRS is searched recursively under S:\SNDataX1\PARTS and DXF is searched recursively under Y:\.</div>
   </section>
 
   <section class="card">
@@ -77,7 +79,7 @@
     </div>
   </section>
 
-  <footer><span>Build 2.1 — Recursive PRS/DXF + Excel reports</span><span>Local bridge: 127.0.0.1:17832</span></footer>
+  <footer><span>Build 2.2 — Separate recursive PRS/DXF libraries + Excel reports</span><span>Local bridge: 127.0.0.1:17832</span></footer>
 </main>
 
 <script src="src/clParser.js"></script>
