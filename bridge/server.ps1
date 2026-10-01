@@ -124,7 +124,8 @@ function Inspect-Prs([string]$file) {
 }
 
 function Normalize([string]$s){ if($null -eq $s){$s=''}; (($s.ToUpperInvariant() -replace '[^A-Z0-9]','') -replace 'PRS$','') }
-function VariationKey([string]$s){ $n=Normalize -s $s; if($n -match '[A-Z0-9]function Normalize-Material([string]$s){
+function VariationKey([string]$s){ $n=Normalize -s $s; if($n -match '[A-Z0-9]$'){ $n=$n.Substring(0,$n.Length-1) }; return $n }
+function Normalize-Material([string]$s){
   if($null -eq $s){$s=''}
   $s=$s -replace '(?i)Armoxt|Amoxt','Armox'
   $s=$s -replace '(?i)Ramort','Ramor'
