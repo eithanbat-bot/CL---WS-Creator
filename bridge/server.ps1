@@ -183,31 +183,44 @@ function Stop-RunningDxfWorkers([string]$root){
 
 function Start-DxfScan([string]$root){
   $status=Get-DxfStatus
-  Stop-RunningDxfWorkers -root $root
   $requiredIndexerVersion='2.0.1'
 
-  if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'RUNNING'){
-    if([string]$status.indexerVersion -eq $requiredIndexerVersion){
-      try{
-        if($status.pid){
-          $p=Get-Process -Id ([int]$status.pid) -ErrorAction SilentlyContinue
-          if($p){return $status}
-        }
-      }catch{}
-    }
-    # An older/unidentified worker may still be running. Stop it before starting
-    # the new indexer so Scan Both can recover without a PC reboot.
-    try{if($status.pid){Stop-Process -Id ([int]$status.pid) -Force -ErrorAction SilentlyContinue}}catch{}
+  if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'COMPLETE' -and
+     [string]$status.indexerVersion -eq $requiredIndexerVersion -and
+     (Test-Path -LiteralPath $DXF_INDEX_FILE) -and
+     (Test-Path -LiteralPath $DXF_INDEX_DIR)){
+    return $status
   }
-  if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'COMPLETE' -and [string]$status.indexerVersion -eq $requiredIndexerVersion -and (Test-Path -LiteralPath $DXF_INDEX_FILE) -and (Test-Path -LiteralPath $DXF_INDEX_DIR)){return $status}
-  if(-not(Test-Path -LiteralPath $DXF_SCAN_SCRIPT)){return [pscustomobject]@{state='FAILED';root=$root;filesFound=0;errors=1;message='DXF indexer script is missing: '+$DXF_SCAN_SCRIPT}}
+
+  if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'RUNNING' -and
+     [string]$status.indexerVersion -eq $requiredIndexerVersion){
+    try{
+      if($status.pid){
+        $p=Get-Process -Id ([int]$status.pid) -ErrorAction SilentlyContinue
+        if($p){return $status}
+      }
+    }catch{}
+  }
+
+  # Only stop workers when the recorded worker is stale, missing, or belongs
+  # to an older indexer/root. A healthy current worker must never be restarted.
+  Stop-RunningDxfWorkers -root $root
+
+  if(-not(Test-Path -LiteralPath $DXF_SCAN_SCRIPT)){
+    return [pscustomobject]@{
+      state='FAILED'
+      indexerVersion=$requiredIndexerVersion
+      root=$root
+      filesFound=0
+      errors=1
+      message='DXF indexer script is missing: '+$DXF_SCAN_SCRIPT
+    }
+  }
 
   try{
     Remove-Item -LiteralPath ($DXF_INDEX_FILE+'.tmp') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath ($DXF_INDEX_DIR+'.tmp') -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Publish RUNNING before launching the worker. This removes the startup race
-    # where the API could report IDLE for the first few hundred milliseconds.
     $started=(Get-Date).ToUniversalTime().ToString('o')
     $starting=[pscustomobject]@{
       state='RUNNING'
@@ -232,12 +245,18 @@ function Start-DxfScan([string]$root){
 
     return $starting
   }catch{
-    $failed=[pscustomobject]@{state='FAILED';indexerVersion=$requiredIndexerVersion;root=$root;filesFound=0;errors=1;message=$_.Exception.Message}
+    $failed=[pscustomobject]@{
+      state='FAILED'
+      indexerVersion=$requiredIndexerVersion
+      root=$root
+      filesFound=0
+      errors=1
+      message=$_.Exception.Message
+    }
     try{($failed|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
     return $failed
   }
 }
-
 function Dxf-ShardKey([string]$part){
   $n=Normalize -s $part
   if([string]::IsNullOrWhiteSpace($n)){return '__'}
