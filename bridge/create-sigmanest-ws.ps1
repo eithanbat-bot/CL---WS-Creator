@@ -25,35 +25,40 @@ try{
     $part=$null
     $leaf=[IO.Path]::GetFileNameWithoutExtension($prs)
 
-    # SigmaNEST's COM wrapper is sensitive to PowerShell's normal COM
-    # argument binder. Invoke the COM method explicitly and pass exactly
-    # one string argument (the PRS/library part name).
-    $partsList=$app.PartsList
+    # Do not use PartsList.AddfromLibrary here. On some SigmaNEST X1.4
+    # installations PowerShell's COM binder treats that member as a command
+    # parameter call and produces:
+    # "A positional parameter cannot be found that accepts argument ...PRS".
+    #
+    # SNApp.LoadPart(path) is the COM entry point exposed by the installation
+    # diagnostics and returns a real success/failure value. Once a part is
+    # loaded, CreatePartsListForNewPartsInWS() commits the newly loaded part
+    # into the workspace PartsList.
     try{
-      $part=$partsList.GetType().InvokeMember(
-        'AddfromLibrary',
-        [Reflection.BindingFlags]::InvokeMethod,
-        $null,
-        $partsList,
-        @([string]$leaf)
-      )
+      $loaded=$app.LoadPart([string]$prs)
     }catch{
-      $firstError=$_.Exception.Message
-      # Some SigmaNEST installations expect the full PRS path instead of
-      # the library leaf name. Try that explicitly as a second form.
-      try{
-        $part=$partsList.GetType().InvokeMember(
-          'AddfromLibrary',
-          [Reflection.BindingFlags]::InvokeMethod,
-          $null,
-          $partsList,
-          @([string]$prs)
-        )
-      }catch{
-        throw ('Could not add PRS "'+$leaf+'" to SigmaNEST PartsList. First COM error: '+$firstError+'; second COM error: '+$_.Exception.Message)
-      }
+      throw ('SigmaNEST LoadPart failed for "'+$leaf+'.PRS": '+$_.Exception.Message)
     }
-    if($null -eq $part){throw ('SigmaNEST could not load part: '+$leaf)}
+    if(-not [bool]$loaded){
+      throw ('SigmaNEST LoadPart returned False for "'+$leaf+'.PRS".')
+    }
+
+    $beforeCount=0
+    try{$beforeCount=[int]$app.PartsList.Count}catch{}
+    try{$app.CreatePartsListForNewPartsInWS()}catch{
+      throw ('SigmaNEST could not add "'+$leaf+'.PRS" to the workspace PartsList: '+$_.Exception.Message)
+    }
+
+    $afterCount=0
+    try{$afterCount=[int]$app.PartsList.Count}catch{}
+    if($afterCount -le $beforeCount){
+      throw ('SigmaNEST loaded "'+$leaf+'.PRS" but did not add it to the workspace PartsList.')
+    }
+
+    # Use the newly-created last PartsList item.
+    try{$part=$app.PartsList.Items($afterCount-1)}catch{
+      throw ('SigmaNEST added "'+$leaf+'.PRS" but its new PartsList item could not be accessed: '+$_.Exception.Message)
+    }
     try{$part.QtyToNest=[int][math]::Round([double]$x.qty)}catch{}
     try{$part.Material=[string]$x.sigmaMaterial}catch{}
     try{$part.Thickness=[double]$x.thicknessMm}catch{}
