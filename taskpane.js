@@ -324,11 +324,11 @@ async function preview(){
   }
 }
 
-async function scan(){
+var dxfMonitorTimer=null;,,function monitorDxfIndex(root){,  if(dxfMonitorTimer)window.clearInterval(dxfMonitorTimer);,  async function check(){,    try{,      var st=await bridge('/api/dxf-status');,      if(String(st.root||'')!==String(root)){return},      if(st.state==='RUNNING'){,        $('libraryStatus').textContent='DXF indexing in progress under '+root+' — '+(st.filesFound||0)+' DXF files indexed so far.'+(st.currentPath?' Current: '+st.currentPath:'');,        pill('DXF indexing','neutral');,      }else if(st.state==='COMPLETE'){,        $('libraryStatus').textContent=(st.filesFound||0)+' .DXF files indexed recursively under '+root+'. PRS library is indexed separately.';,        pill('Libraries ready','ok');,        if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null},      }else if(st.state==='FAILED'){,        $('libraryStatus').textContent='DXF indexing failed: '+(st.message||'Unknown error');,        pill('DXF index failed','bad');,        if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null},      },    }catch(e){},  },  check();,  dxfMonitorTimer=window.setInterval(check,3000);,},async function scan(){
   var btn=$('scanLibrary');
   var started=Date.now();
   btn.disabled=true;
-  $('libraryStatus').textContent='Scanning PRS and DXF server folders recursively ...';
+  $('libraryStatus').textContent='Checking PRS and starting background DXF indexing...';
   pill('Scanning geometry','neutral');
   try{
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
@@ -340,20 +340,26 @@ async function scan(){
     var r=await bridge('/api/scan',{method:'POST',body:JSON.stringify({prsRoot:prsRoot,dxfRoot:dxfRoot})});
     var scanErrors=(r.scanErrors||[]).length, inspectErrors=(r.inspectErrors||[]).length;
     var elapsed=Math.round((Date.now()-started)/1000);
-    if(!r.count && !r.discoveredFiles){
-      $('libraryStatus').textContent='No .PRS or .DXF geometry files were found in the selected server folders. Scan completed in '+elapsed+'s.';
-      pill('No PRS files','warn');
-    }else if(scanErrors||inspectErrors){
+    if(scanErrors||inspectErrors){
       var first=(r.scanErrors&&r.scanErrors[0])?(r.scanErrors[0].path+': '+r.scanErrors[0].error):(r.inspectErrors[0]?r.inspectErrors[0].path+': '+r.inspectErrors[0].error:'Unknown scan issue');
-      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(r.dxfCount||0)+' .DXF files indexed; '+(scanErrors+inspectErrors)+' issue(s). PRS: '+(r.prsRoot||prsRoot)+' | DXF: '+(r.dxfRoot||dxfRoot)+' | First: '+first+' ('+elapsed+'s)';
+      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS indexed; DXF background indexing status: '+((r.dxfStatus&&r.dxfStatus.state)||'UNKNOWN')+'. First issue: '+first+' ('+elapsed+'s)';
       pill('Library partial','warn');
     }else{
-      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS under '+(r.prsRoot||prsRoot)+' + '+(r.dxfCount||0)+' .DXF under '+(r.dxfRoot||dxfRoot)+' indexed recursively in '+elapsed+'s.';
-      pill('Library ready','ok');
+      var ds=r.dxfStatus||{};
+      $('libraryStatus').textContent=(r.prsCount||0)+' .PRS indexed under '+prsRoot+'. DXF indexing: '+(ds.state||'STARTING')+' under '+dxfRoot+'. This continues in the background.';
+      if(ds.state==='COMPLETE'){
+        $('libraryStatus').textContent=(r.prsCount||0)+' .PRS + '+(ds.filesFound||r.dxfCount||0)+' .DXF indexed recursively. Libraries ready.';
+        pill('Libraries ready','ok');
+      }else if(ds.state==='FAILED'){
+        pill('DXF index failed','bad');
+      }else{
+        pill('DXF indexing','neutral');
+        monitorDxfIndex(dxfRoot);
+      }
     }
   }catch(e){
     $('libraryStatus').textContent=e.message;
-    pill(e.message.indexOf('did not finish')>=0?'Scan timeout':'Bridge error','bad');
+    pill(e.message.indexOf('did not finish')>=0?'Bridge timeout':'Bridge error','bad');
   }finally{
     btn.disabled=false;
   }
@@ -419,8 +425,9 @@ Office.onReady(async function(info){
 
   try{
     var h=await bridge('/api/health');
-    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). Library: '+h.libraryRoot+(h.prsCount!=null?' | PRS root '+(h.libraryRoot||'')+' | DXF root '+(h.dxfRoot||'')+' | PRS '+h.prsCount+' | DXF '+(h.dxfCount||0):'');
+    $('libraryStatus').textContent='Bridge connected (v'+(h.bridgeVersion||'?')+'). PRS root: '+(h.libraryRoot||'')+' | DXF root: '+(h.dxfRoot||'')+(h.prsCount!=null?' | PRS '+h.prsCount+' | DXF index '+(h.dxfIndexState||'IDLE'):'');
     pill('Connected','ok');
+    if(h.dxfIndexState==='RUNNING'&&h.dxfRoot)monitorDxfIndex(h.dxfRoot);
   }catch(e){
     $('libraryStatus').textContent='Start start-bridge.bat on this PC.';
     pill('Bridge offline','warn');
