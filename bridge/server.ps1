@@ -236,37 +236,65 @@ function Start-DxfScan([string]$root){
     }
     ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
 
-    # Use an encoded PowerShell command so mapped/network paths and folders with
-    # spaces cannot be broken by Start-Process argument quoting.
+    # Launch the worker through System.Diagnostics.Process so its
+    # stdout/stderr can be captured even when Windows PowerShell exits before
+    # the script gets far enough to create its own log.
     $command="& '$DXF_SCAN_SCRIPT' -Root '$root' -IndexFile '$DXF_INDEX_FILE' -StatusFile '$DXF_STATUS_FILE'"
     $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $launchLog=Join-Path $ROOT 'dxf-indexer-launch.log'
+    $stdoutLog=Join-Path $ROOT 'dxf-indexer-stdout.log'
+    $stderrLog=Join-Path $ROOT 'dxf-indexer-stderr.log'
     try{
-      ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Launching powershell.exe -EncodedCommand for DXF indexer. Script='+$DXF_SCAN_SCRIPT+' Root='+$root)|Add-Content -LiteralPath $launchLog -Encoding UTF8
-    }catch{}
-    $proc=Start-Process -FilePath 'powershell.exe' -WorkingDirectory $ROOT -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
+      ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Launching powershell.exe via ProcessStartInfo. Script='+$DXF_SCAN_SCRIPT+' Root='+$root)|Add-Content -LiteralPath $launchLog -Encoding UTF8
+      $psi=New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName='powershell.exe'
+      $psi.Arguments='-NoProfile -ExecutionPolicy Bypass -EncodedCommand '+$encoded
+      $psi.WorkingDirectory=$ROOT
+      $psi.UseShellExecute=$false
+      $psi.CreateNoWindow=$true
+      $psi.RedirectStandardOutput=$true
+      $psi.RedirectStandardError=$true
+      $proc=[System.Diagnostics.Process]::Start($psi)
+    }catch{
+      $message='Could not launch DXF indexer process: '+$_.Exception.Message
+      $failed=[pscustomobject]@{
+        state='FAILED'
+        indexerVersion=$requiredIndexerVersion
+        root=$root
+        filesFound=0
+        errors=1
+        message=$message
+        pid=$null
+        logFile=$stderrLog
+        launchLogFile=$launchLog
+      }
+      try{($failed|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
+      return $failed
+    }
+
     try{
       $starting.pid=$proc.Id
       $starting.message='DXF indexer process launched (PID '+$proc.Id+'); waiting for the indexer heartbeat.'
+      $starting.logFile=$stdoutLog
+      $starting.launchLogFile=$launchLog
       ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
       ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Process launched. PID='+$proc.Id)|Add-Content -LiteralPath $launchLog -Encoding UTF8
     }catch{}
 
-    Start-Sleep -Milliseconds 1500
+    Start-Sleep -Milliseconds 2500
     try{
-      $alive=Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
-      if(-not $alive){
-        $log=Join-Path $ROOT 'dxf-indexer.log'
-        $logTail=''
-        if(Test-Path -LiteralPath $log){
-          try{$logTail=(Get-Content -LiteralPath $log -Tail 8 -ErrorAction SilentlyContinue) -join ' | '}catch{}
-        }
-        $launchTail=''
-        if(Test-Path -LiteralPath $launchLog){
-          try{$launchTail=(Get-Content -LiteralPath $launchLog -Tail 8 -ErrorAction SilentlyContinue) -join ' | '}catch{}
-        }
-        $message='DXF indexer exited immediately after launch. '+$launchTail
-        if($logTail){$message+=' '+$logTail}
+      if($proc.HasExited){
+        $stdout=''
+        $stderr=''
+        try{$stdout=$proc.StandardOutput.ReadToEnd()}catch{}
+        try{$stderr=$proc.StandardError.ReadToEnd()}catch{}
+        try{if($stdout){$stdout|Set-Content -LiteralPath $stdoutLog -Encoding UTF8}}catch{}
+        try{if($stderr){$stderr|Set-Content -LiteralPath $stderrLog -Encoding UTF8}}catch{}
+        $exitCode=$proc.ExitCode
+        $parts=@('DXF indexer exited immediately after launch (exit code '+$exitCode+').')
+        if($stderr){$parts+=('STDERR: '+(($stderr -replace '\r?\n',' ') -replace '\s+',' ').Trim())}
+        if($stdout){$parts+=('STDOUT: '+(($stdout -replace '\r?\n',' ') -replace '\s+',' ').Trim())}
+        $message=$parts -join ' '
         $failed=[pscustomobject]@{
           state='FAILED'
           indexerVersion=$requiredIndexerVersion
@@ -275,24 +303,28 @@ function Start-DxfScan([string]$root){
           errors=1
           message=$message
           pid=$proc.Id
-          logFile=$log
+          exitCode=$exitCode
+          logFile=$stdoutLog
+          stderrLogFile=$stderrLog
           launchLogFile=$launchLog
         }
         try{($failed|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
         return $failed
       }
+
       try{
         $current=Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json
-        if([string]$current.message -eq 'DXF indexer process launched (PID '+$proc.Id+'); waiting for the indexer heartbeat.'){
-          $current.message='DXF indexer process is alive (PID '+$proc.Id+'); first heartbeat has not arrived yet.'
-          $current.logFile=(Join-Path $ROOT 'dxf-indexer.log')
-          $current.launchLogFile=$launchLog
-          ($current|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
-        }
+        $current.message='DXF indexer process is alive (PID '+$proc.Id+'). Waiting for the first scan heartbeat.'
+        $current.logFile=$stdoutLog
+        $current.stderrLogFile=$stderrLog
+        $current.launchLogFile=$launchLog
+        ($current|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
+        ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Process still alive after 2.5 seconds. PID='+$proc.Id)|Add-Content -LiteralPath $launchLog -Encoding UTF8
       }catch{}
     }catch{}
 
     return $starting
+  }
   }catch{
     $failed=[pscustomobject]@{
       state='FAILED'
