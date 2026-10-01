@@ -116,7 +116,7 @@ jobs:
           if (-not $updater.Contains('$_.path -like ''bridge/*''')) {
             throw 'Updater does not discover bridge files from the GitHub tree.'
           }
-          if (-not $updater.Contains('dxf-index.json') -or -not $updater.Contains('dxf-index-status.json')) {
+          if ($updater -notlike '*dxf-index.json*' -or $updater -notlike '*dxf-index-status.json*') {
             throw 'Updater does not preserve generated DXF index state.'
           }
 
