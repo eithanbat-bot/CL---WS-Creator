@@ -9,8 +9,9 @@ function pill(t,k){$('statusPill').textContent=t;$('statusPill').className='pill
 async function bridge(path,opts){
   opts=opts||{};
   var url=BRIDGE+path;
+  var timeout=opts.timeoutMs||30000;
   var controller=window.AbortController?new AbortController():null;
-  var timer=controller?window.setTimeout(function(){controller.abort()},30000):null;
+  var timer=controller?window.setTimeout(function(){controller.abort()},timeout):null;
   try{
     var init={
       method:opts.method||'GET',
@@ -224,11 +225,22 @@ async function scan(){
 }
 
 async function build(){
+  var btn=$('build');
+  btn.disabled=true;
+  $('preview').disabled=true;
+  $('buildStatus').textContent='Preparing '+$('jobName').value.trim()+'...';
+  pill('Creating job','neutral');
   try{
     var parts=await readCL();
+    $('buildStatus').textContent='Matching '+parts.length+' CL lines against the PRS library...';
     var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||('CL_'+Date.now());
-    var r=await bridge('/api/build-job',{method:'POST',body:JSON.stringify({jobName:job,libraryRoot:root,parts:parts})});
+    $('buildStatus').textContent='Building '+job+' — please leave the bridge window open...';
+    var r=await bridge('/api/build-job',{
+      method:'POST',
+      body:JSON.stringify({jobName:job,libraryRoot:root,parts:parts}),
+      timeoutMs:300000
+    });
     showParts(r.parts,'built');
     $('geometryFound').textContent=r.parts.filter(function(x){return x.status==='READY'}).length;
     $('geometryMissing').textContent=r.parts.filter(function(x){return x.status!=='READY'}).length;
@@ -236,7 +248,10 @@ async function build(){
     pill(r.reviewCount?'Review required':'SigmaNEST WS ready',r.reviewCount?'warn':'ok');
   }catch(e){
     $('buildStatus').textContent=e.message;
-    pill('Build failed','bad');
+    pill(e.message.indexOf('did not finish')>=0?'Build timeout':'Build failed','bad');
+  }finally{
+    btn.disabled=false;
+    updateCount();
   }
 }
 
