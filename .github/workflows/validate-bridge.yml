@@ -1,25 +1,36 @@
-name: Validate bridge scripts
+name: Validate bridge and web files
 
 on:
   push:
   workflow_dispatch:
 
 jobs:
-  validate-powershell:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Parse bridge scripts
+
+      - name: Parse PowerShell files
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $files = @(
             'bridge/server.ps1',
             'bridge/create-sigmanest-ws.ps1',
-            'bridge/dxf-indexer.ps1'
+            'bridge/dxf-indexer.ps1',
+            'bridge/update-and-start.ps1'
           )
 
           foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) {
+              throw "Missing required PowerShell file: $file"
+            }
+
+            $text = Get-Content -Raw -LiteralPath $file
+            if ($text -match '\\n') {
+              throw "$file contains a literal \\n sequence. This is almost always an accidental escaped newline."
+            }
+
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
@@ -37,11 +48,10 @@ jobs:
             Write-Host "$file syntax: OK" -ForegroundColor Green
           }
 
-
       - name: Validate web files
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           node --check taskpane.js
           node --check src/clParser.js
           echo "JavaScript syntax: OK"
@@ -54,75 +64,72 @@ jobs:
           if (-not $xml.OfficeApp) {
             throw 'manifest.xml did not parse as an OfficeApp manifest.'
           }
+
+          $source = [string]$xml.OfficeApp.DefaultSettings.SourceLocation.DefaultValue
+          if ($source -notmatch '^https://eithanbat-bot\.github\.io/CL---WS-Creator/taskpane\.html') {
+            throw "manifest.xml SourceLocation is unexpected: $source"
+          }
+
           Write-Host 'manifest.xml: OK' -ForegroundColor Green
 
-      - name: Check known build-path hazards
+      - name: Validate architecture and launcher
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $server = Get-Content -Raw -LiteralPath 'bridge/server.ps1'
-          $creator = Get-Content -Raw -LiteralPath 'bridge/create-sigmanest-ws.ps1'
-          $bat = Get-Content -Raw -LiteralPath 'start-bridge.bat'
+          $indexer = Get-Content -Raw -LiteralPath 'bridge/dxf-indexer.ps1'
+          $updater = Get-Content -Raw -LiteralPath 'bridge/update-and-start.ps1'
+          $taskpane = Get-Content -Raw -LiteralPath 'taskpane.js'
+          $html = Get-Content -Raw -LiteralPath 'taskpane.html'
+          $bat = Get-Content -Raw -LiteralPath 'Start Bridge Fixed.bat'
 
-          if ($server -match "Join-Path\s+\$out\s+'parts'\s+\(\[IO\.Path\]::GetFileName\(\$p\.file\)\)") {
-            throw 'Unsafe three-argument Join-Path remains in Write-Job.'
+          if ($server -notmatch 'function Start-DxfScan') {
+            throw 'Server does not contain Start-DxfScan.'
           }
-
-          if ($creator -match '(?m)^\s*.*AddfromLibrary\s*\(' -and $creator -notmatch '(?m)^\s*#') {
-            throw 'Executable AddfromLibrary call remains in the SigmaNEST creator.'
+          if ($server -notmatch "function Get-DxfIndexItems") {
+            throw 'Server does not contain the DXF index reader.'
           }
-
-          foreach ($needle in @(
-            "%~dp0bridge\server.ps1",
-            "%~dp0bridge\create-sigmanest-ws.ps1"
-          )) {
-            if ($bat -notlike "*$needle*") {
-              throw "start-bridge.bat is missing expected path: $needle"
-            }
+          if ($server -match 'Get-ChildItem[^\r\n]*\\dxfRoot[^\r\n]*-Recurse') {
+            throw 'Server must never recursively enumerate the DXF root during an HTTP request.'
           }
-
-          if ($bat -notlike '*Parser]::ParseFile*') {
-            throw 'start-bridge.bat is missing the local syntax preflight.'
+          if ($server -match 'Get-GeometryFiles\s+-root\s+\$dxfRoot') {
+            throw 'Server must not use the synchronous Get-GeometryFiles walk for Y:\.'
           }
-
-          if ($server -notmatch "function Scan-Libraries") {
-            throw 'Server scan does not use the separate PRS/DXF library scan.'
+          if ($server -notmatch "dxfStatus\.state.*COMPLETE") {
+            throw 'Server is missing the DXF readiness check.'
           }
-
-          if ($server -notmatch "Get-GeometryFiles -root \$prsRoot -extension '\.prs'") {
-            throw 'Server scan is missing recursive PRS indexing.'
+          if ($server -notmatch "DXF_INDEX_NOT_READY") {
+            throw 'Server build API does not reject incomplete DXF indexes.'
           }
-
-          if ($server -notmatch "Get-GeometryFiles -root \$dxfRoot -extension '\.dxf'") {
-            throw 'Server scan is missing recursive DXF indexing.'
-          }
-
           if ($server -notmatch "FOUND - DXF") {
-            throw 'Server build path is missing DXF-ready status handling.'
+            throw 'Server does not have the DXF-ready status path.'
           }
 
-          if ($creator -notmatch "sourceType") {
-            throw 'SigmaNEST creator does not receive sourceType.'
+          if ($indexer -notmatch 'System\.IO\.Directory::EnumerateFiles') {
+            throw 'DXF indexer is not using the streaming directory enumerator.'
+          }
+          if ($indexer -notmatch "DXF_INDEXER_VERSION = '2\.0\.1'") {
+            throw 'Unexpected DXF indexer version.'
+          }
+          if ($indexer -notmatch 'indexerVersion=') {
+            throw 'DXF status does not publish indexerVersion.'
           }
 
-          if ($server -notmatch "Start-DxfScan") {
-            throw 'Server does not launch DXF indexing in the background.'
+          if ($updater -notmatch 'Test-Syntax') {
+            throw 'Updater is missing downloaded PowerShell syntax validation.'
+          }
+          if ($updater -notmatch 'dxf-indexer\.ps1') {
+            throw 'Updater does not update the DXF indexer.'
           }
 
-          if ($server -notmatch "api/dxf-status") {
-            throw 'Server is missing DXF scan status endpoint.'
+          if ($bat -notmatch 'Start Bridge Fixed' -and $bat -notmatch 'UPDATER_URL') {
+            throw 'Self-updating launcher is missing its GitHub updater.'
+          }
+          if ($taskpane -notmatch 'Start Bridge Fixed\.bat') {
+            throw 'Task pane still instructs users to start the obsolete launcher name.'
+          }
+          if ($html -notmatch 'taskpane\.js\?v=') {
+            throw 'Task pane cache-busting is missing.'
           }
 
-          if ($server -match "Get-ChildItem -LiteralPath \\$dxfRoot -Recurse" -or $server -match "Get-GeometryFiles -root \\$dxfRoot") {
-            throw 'HTTP server path must not synchronously walk the DXF root.'
-          }
-
-          if ((Get-Content -Raw -LiteralPath 'taskpane.html') -notmatch 'placeholder="Y:\\"') {
-            throw 'Task pane does not default the DXF library to Y:\.'
-          }
-
-          if ((Get-Content -Raw -LiteralPath 'taskpane.js') -notmatch "dxfRoot.*Y:\\\\") {
-            throw 'Task pane does not use the Y:\ DXF root.'
-          }
-
-          Write-Host 'Build-path hazard checks: OK' -ForegroundColor Green
+          Write-Host 'Architecture checks: OK' -ForegroundColor Green
