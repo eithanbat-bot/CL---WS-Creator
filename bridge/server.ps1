@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.2.1'
+$BRIDGE_VERSION = '2.3.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -135,16 +135,18 @@ function Thickness-Number([string]$s){
   $m=[regex]::Match([string]$s,'(\d+(?:\.\d+)?)\s*mm',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
   if($m.Success){[double]$m.Groups[1].Value}else{[double]::NaN}
 }
-function Material-Equal([string]$a,[string]$b){
+function Material-Equal([string]$a,[string]$b,[string]$aThickness='',[string]$bThickness=''){
   $A=(Normalize-Material -s $a).ToUpperInvariant()
   $B=(Normalize-Material -s $b).ToUpperInvariant()
   if(-not $A -or -not $B -or $A -eq $B){return $true}
 
-  # Required job rule: 4 mm Armox is treated as Ramor 500.
-  $A4Armox=($A -match 'ARMOX' -and $A -match '4\s*MM')
-  $B4Armox=($B -match 'ARMOX' -and $B -match '4\s*MM')
-  $ARamor500=($A -match 'RAMOR' -and $A -match '500')
-  $BRamor500=($B -match 'RAMOR' -and $B -match '500')
+  # Required job rule: 4 mm Armox is treated as Ramor 500 4 mm.
+  $aThk=Thickness-Number -s $aThickness
+  $bThk=Thickness-Number -s $bThickness
+  $A4Armox=($A -match 'ARMOX' -and (($aThk -eq 4) -or ($A -match '4\s*MM')))
+  $B4Armox=($B -match 'ARMOX' -and (($bThk -eq 4) -or ($B -match '4\s*MM')))
+  $ARamor500=($A -match 'RAMOR' -and $A -match '500' -and (($aThk -eq 4) -or ($A -match '4\s*MM')))
+  $BRamor500=($B -match 'RAMOR' -and $B -match '500' -and (($bThk -eq 4) -or ($B -match '4\s*MM')))
   if(($A4Armox -and $BRamor500) -or ($B4Armox -and $ARamor500)){return $true}
 
   $ANoSize=($A -replace '\b\d+(?:\.\d+)?\s*MM\b','' -replace '\s+(SHEET|PLATE)\b','').Trim()
@@ -236,6 +238,8 @@ function Get-DxfShardCandidates([string]$root,[string]$part){
   $shard=Join-Path $DXF_INDEX_DIR ((Dxf-ShardKey -part $part)+'.tsv')
   if(-not(Test-Path -LiteralPath $shard)){return @()}
 
+  if($script:DXF_SHARD_CACHE -and $script:DXF_SHARD_CACHE.ContainsKey($shard)){return $script:DXF_SHARD_CACHE[$shard]}
+
   $items=@()
   $reader=$null
   try{
@@ -263,6 +267,7 @@ function Get-DxfShardCandidates([string]$root,[string]$part){
   }catch{}finally{
     if($reader){$reader.Dispose()}
   }
+  if($script:DXF_SHARD_CACHE -ne $null){$script:DXF_SHARD_CACHE[$shard]=$items}
   return $items
 }
 
@@ -306,6 +311,7 @@ function Scan-Libraries([string]$prsRoot,[string]$dxfRoot){
   # during a build, while the relatively small PRS library remains in memory.
   $script:INDEX=$items
   $script:DXF_ROOT=$dxfRoot
+  $script:DXF_SHARD_CACHE=@{}
   $script:BYNAME=@{}
   $script:BYVAR=@{}
   foreach($item in $items){
@@ -553,7 +559,7 @@ function Handle-Request($req){
       $clThkKnown=!!$clThk.Trim()
       $mok=$true
       $tok=$true
-      if($matKnown -and $clMatKnown){$mok=Material-Equal -a $clMat -b $libMat}
+      if($matKnown -and $clMatKnown){$mok=Material-Equal -a $clMat -b $libMat -aThickness $clThk -bThickness $libThk}
       if($thkKnown -and $clThkKnown){$tok=(Thickness-Number -s $clThk) -eq (Thickness-Number -s $libThk)}
       $variation=([string]$f.matchType -eq 'VARIATION')
 
