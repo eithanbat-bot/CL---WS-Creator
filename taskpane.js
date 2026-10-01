@@ -8,15 +8,24 @@ function pill(t,k){$('statusPill').textContent=t;$('statusPill').className='pill
 
 async function bridge(path,opts){
   opts=opts||{};
-  var r=await fetch(BRIDGE+path,{
-    method:opts.method||'GET',
-    headers:{'Content-Type':'application/json'},
-    body:opts.body,
-    targetAddressSpace:'loopback'
-  });
-  var d={};try{d=await r.json()}catch(e){}
-  if(!r.ok)throw new Error(d.error||('Bridge request failed: '+r.status));
-  return d;
+  var url=BRIDGE+path;
+  try{
+    var r=await fetch(url,{
+      method:opts.method||'GET',
+      headers:{'Content-Type':'application/json'},
+      body:opts.body,
+      targetAddressSpace:'loopback',
+      cache:'no-store'
+    });
+    var d={};try{d=await r.json()}catch(e){}
+    if(!r.ok)throw new Error(d.error||('Bridge request failed: '+r.status));
+    return d;
+  }catch(e){
+    if(e&&e.message==='Failed to fetch'){
+      throw new Error('Cannot connect to the local CL-WS bridge at '+url+'. Make sure start-bridge.bat is running on this PC, then click Scan again. If it is already running, close it and start it again so the updated bridge loads.');
+    }
+    throw e;
+  }
 }
 
 function setBuildEnabled(enabled){
