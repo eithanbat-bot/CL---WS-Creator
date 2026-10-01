@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '1.8.0'
+$BRIDGE_VERSION = '1.9.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CFG_FILE = Join-Path $ROOT 'config.json'
@@ -291,10 +291,43 @@ function Handle-Request($req){
       if($f.PSObject.Properties.Name -contains 'ambiguous'){
         Set-Prop $p 'status' 'REVIEW' | Out-Null;Set-Prop $p 'statusLabel' ('AMBIGUOUS ('+$f.ambiguous.Count+')') | Out-Null;$parts+=$p;continue
       }
-      $libMat=[string]$f.likelyMaterial;$libThk=[string]$f.thickness
-      $matKnown=!!$libMat.Trim();$thkKnown=!!$libThk.Trim();$mok=$matKnown -and (Material-Equal -a ([string]$p.material) -b $libMat);$tok=$thkKnown -and !!$p.thickness -and ((Thickness-Number -s ([string]$p.thickness)) -eq (Thickness-Number -s $libThk));$variation=([string]$f.matchType -eq 'VARIATION')
-      $status=if($matKnown -and $thkKnown -and $mok -and $tok -and -not$variation){'READY'}else{'REVIEW'}
-      $label=if($status -eq 'READY'){'FOUND'}elseif($variation){'VARIATION - REVIEW'}elseif(-not$matKnown){'MATERIAL NOT CONFIRMED'}elseif(-not$mok){'MATERIAL MISMATCH'}elseif(-not$thkKnown){'THICKNESS NOT CONFIRMED'}elseif(-not$tok){'THICKNESS MISMATCH'}else{'REVIEW'}
+      $libMat=[string]$f.likelyMaterial
+      $libThk=[string]$f.thickness
+      $clMat=[string]$p.material
+      $clThk=[string]$p.thickness
+      $matKnown=!!$libMat.Trim()
+      $thkKnown=!!$libThk.Trim()
+      $clMatKnown=!!$clMat.Trim()
+      $clThkKnown=!!$clThk.Trim()
+      $mok=$true
+      $tok=$true
+      if($matKnown -and $clMatKnown){$mok=Material-Equal -a $clMat -b $libMat}
+      if($thkKnown -and $clThkKnown){
+        $tok=(Thickness-Number -s $clThk) -eq (Thickness-Number -s $libThk)
+      }
+      $variation=([string]$f.matchType -eq 'VARIATION')
+
+      # The PRS filename identifies the geometry. Material/thickness in the
+      # CL are the requested job settings and are applied to the SigmaNEST
+      # part during creation. PRS metadata is used to catch a known mismatch,
+      # but an unreadable/undocumented metadata field must not block a valid
+      # exact geometry match.
+      if($variation){
+        $status='REVIEW'
+        $label='VARIATION - REVIEW'
+      }elseif(-not $clMatKnown -or -not $clThkKnown){
+        $status='REVIEW'
+        $label='CL MATERIAL/THICKNESS MISSING'
+      }elseif($matKnown -and -not $mok){
+        $status='REVIEW'
+        $label='MATERIAL MISMATCH'
+      }elseif($thkKnown -and -not $tok){
+        $status='REVIEW'
+        $label='THICKNESS MISMATCH'
+      }else{
+        $status='READY'
+        $label=if($matKnown -and $thkKnown){'FOUND'}else{'FOUND - USING CL DATA'}
+      }
       Set-Prop $p 'status' $status | Out-Null;Set-Prop $p 'statusLabel' $label | Out-Null
       Set-Prop $p 'file' $f.file | Out-Null;Set-Prop $p 'prs' $f.file | Out-Null;Set-Prop $p 'sourceDxf' $f.sourceDxf | Out-Null;Set-Prop $p 'matchType' $f.matchType | Out-Null;Set-Prop $p 'libraryMaterial' $libMat | Out-Null;Set-Prop $p 'libraryThickness' $libThk | Out-Null
       $parts+=$p
