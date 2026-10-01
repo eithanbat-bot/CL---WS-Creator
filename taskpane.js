@@ -152,8 +152,8 @@ async function writeReportSheets(result,job,selectedSheetNames){
     actionHeaderRow.format.fill.color='#E7EEF5';
 
     summary.getRange('A1:B'+sm.length).format.wrapText=true;
-    summary.getRange('A:A').format.columnWidth=210;
-    summary.getRange('B:B').format.columnWidth=420;
+    summary.getRange('A1:A'+sm.length).format.columnWidth=210;
+    summary.getRange('B1:B'+sm.length).format.columnWidth=420;
 
     var rm=[reviewHeaders].concat(reviewRows);
     var rr=reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length);
@@ -328,7 +328,7 @@ async function scan(){
   var started=Date.now();
   btn.disabled=true;
   $('libraryStatus').textContent='Scanning S:\\SNDataX1\\PARTS ...';
-  pill('Scanning PRS','neutral');
+  pill('Scanning geometry','neutral');
   try{
     var root=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     $('libraryPath').value=root;
