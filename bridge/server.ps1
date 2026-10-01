@@ -158,103 +158,9 @@ function Sigma-Material([string]$cl,[string]$lib){
   $s=$s -replace '\s+(sheet|plate)$',''
   $s.Trim()
 }
-function Get-GeometryFiles([string]$root,[string]$extension,[System.Collections.ArrayList]$errors){
-  if([string]::IsNullOrWhiteSpace($root)){return @()}
-  try{
-    if(-not(Test-Path -LiteralPath $root)){throw "Cannot access geometry folder: $root"}
-    if(-not((Get-Item -LiteralPath $root).PSIsContainer)){throw "Geometry path is not a folder: $root"}
-    @(
-      Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -ieq $extension } |
-        ForEach-Object { $_.FullName }
-    )
-  }catch{
-    [void]$errors.Add([pscustomobject]@{path=$root;error=$_.Exception.Message})
-    @()
-  }
-}
-
-function Scan-Libraries([string]$prsRoot,[string]$dxfRoot) {
-  $scanErrors=New-Object System.Collections.ArrayList
-  $prsFiles=@(Get-GeometryFiles -root $prsRoot -extension '.prs' -errors $scanErrors)
-  $dxfFiles=@(Get-GeometryFiles -root $dxfRoot -extension '.dxf' -errors $scanErrors)
-
-  $items=@()
-  foreach($file in $prsFiles){
-    $items += [pscustomobject]@{
-      file=$file
-      fileName=[IO.Path]::GetFileName($file)
-      partName=[IO.Path]::GetFileNameWithoutExtension($file)
-      embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($file)
-      fileType='PRS'
-      likelyMaterial=''
-      thickness=''
-      sourceDxf=''
-      rotations=''
-      metadataLoaded=$false
-    }
-  }
-  foreach($file in $dxfFiles){
-    $items += [pscustomobject]@{
-      file=$file
-      fileName=[IO.Path]::GetFileName($file)
-      partName=[IO.Path]::GetFileNameWithoutExtension($file)
-      embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($file)
-      fileType='DXF'
-      likelyMaterial=''
-      thickness=''
-      sourceDxf=$file
-      rotations=''
-      metadataLoaded=$true
-    }
-  }
-
-  $script:INDEX=$items
-  $script:BYNAME=@{}
-  $script:BYVAR=@{}
-  foreach($item in $items){
-    $nk=Normalize -s $item.partName
-    if($nk){
-      if(-not $script:BYNAME.ContainsKey($nk)){$script:BYNAME[$nk]=@()}
-      $script:BYNAME[$nk]+=$item
-    }
-    $vk=VariationKey -s $item.partName
-    if($vk){
-      if(-not $script:BYVAR.ContainsKey($vk)){$script:BYVAR[$vk]=@()}
-      $script:BYVAR[$vk]+=$item
-    }
-  }
-
-  $CFG.libraryRoot=$prsRoot
-  $CFG.dxfRoot=$dxfRoot
-  $CFG.lastScan=(Get-Date).ToUniversalTime().ToString('o')
-  $CFG.count=$items.Count
-  $CFG.discoveredFiles=$items.Count
-  $CFG.prsCount=$prsFiles.Count
-  $CFG.dxfCount=$dxfFiles.Count
-  $CFG.scanErrors=@($scanErrors)
-  $CFG.inspectErrors=@()
-  try{($CFG|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $CFG_FILE -Encoding UTF8}catch{}
-
-  [pscustomobject]@{
-    count=$items.Count
-    discoveredFiles=$items.Count
-    prsCount=$prsFiles.Count
-    dxfCount=$dxfFiles.Count
-    scanErrors=@($scanErrors)
-    inspectErrors=@()
-    prsRoot=$prsRoot
-    dxfRoot=$dxfRoot
-  }
-}
-
 function Get-DxfStatus(){
-  if(-not(Test-Path -LiteralPath $DXF_STATUS_FILE)){
-    return [pscustomobject]@{state='IDLE';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='DXF index has not been started.'}
-  }
-  try{return (Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json)}catch{
-    return [pscustomobject]@{state='UNKNOWN';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='Could not read DXF index status.'}
-  }
+  if(-not(Test-Path -LiteralPath $DXF_STATUS_FILE)){return [pscustomobject]@{state='IDLE';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='DXF index has not been started.'}}
+  try{return (Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json)}catch{return [pscustomobject]@{state='UNKNOWN';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='Could not read DXF index status.'}}
 }
 
 function Start-DxfScan([string]$root){
@@ -268,9 +174,7 @@ function Start-DxfScan([string]$root){
     Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WindowStyle Hidden | Out-Null
     Start-Sleep -Milliseconds 200
     return Get-DxfStatus
-  }catch{
-    return [pscustomobject]@{state='FAILED';root=$root;filesFound=0;errors=1;message=$_.Exception.Message}
-  }
+  }catch{return [pscustomobject]@{state='FAILED';root=$root;filesFound=0;errors=1;message=$_.Exception.Message}}
 }
 
 function Get-DxfIndexItems([string]$root){
@@ -292,11 +196,8 @@ function Get-GeometryFiles([string]$root,[string]$extension,[System.Collections.
   try{
     if(-not(Test-Path -LiteralPath $root)){throw "Cannot access geometry folder: $root"}
     if(-not((Get-Item -LiteralPath $root).PSIsContainer)){throw "Geometry path is not a folder: $root"}
-    @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter ('*'+$extension) -ErrorAction SilentlyContinue | ForEach-Object {$_.FullName})
-  }catch{
-    [void]$errors.Add([pscustomobject]@{path=$root;error=$_.Exception.Message})
-    @()
-  }
+    @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter ('*'+$extension) -ErrorAction SilentlyContinue|ForEach-Object{$_.FullName})
+  }catch{[void]$errors.Add([pscustomobject]@{path=$root;error=$_.Exception.Message});@()}
 }
 
 function Scan-Libraries([string]$prsRoot,[string]$dxfRoot){
@@ -304,9 +205,7 @@ function Scan-Libraries([string]$prsRoot,[string]$dxfRoot){
   $prsFiles=@(Get-GeometryFiles -root $prsRoot -extension '.prs' -errors $scanErrors)
   $dxfItems=@(Get-DxfIndexItems -root $dxfRoot)
   $items=@()
-  foreach($file in $prsFiles){
-    $items += [pscustomobject]@{file=$file;fileName=[IO.Path]::GetFileName($file);partName=[IO.Path]::GetFileNameWithoutExtension($file);embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($file);fileType='PRS';likelyMaterial='';thickness='';sourceDxf='';rotations='';metadataLoaded=$false}
-  }
+  foreach($file in $prsFiles){$items += [pscustomobject]@{file=$file;fileName=[IO.Path]::GetFileName($file);partName=[IO.Path]::GetFileNameWithoutExtension($file);embeddedPartName=[IO.Path]::GetFileNameWithoutExtension($file);fileType='PRS';likelyMaterial='';thickness='';sourceDxf='';rotations='';metadataLoaded=$false}}
   $items += $dxfItems
   $script:INDEX=$items
   $script:BYNAME=@{}
