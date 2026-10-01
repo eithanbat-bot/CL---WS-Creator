@@ -103,7 +103,7 @@ jobs:
           if (-not $indexer.Contains('[IO.Directory]::EnumerateFiles')) {
             throw 'DXF indexer is not using the streaming directory enumerator.'
           }
-          if (-not $indexer.Contains("$DXF_INDEXER_VERSION = '2.0.1'")) {
+          if (-not $indexer.Contains("$DXF_INDEXER_VERSION = '2.0.2'")) {
             throw 'Unexpected DXF indexer version.'
           }
           if ($indexer -notmatch 'indexerVersion=') {
