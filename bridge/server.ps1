@@ -183,7 +183,7 @@ function Stop-RunningDxfWorkers([string]$root){
 
 function Start-DxfScan([string]$root){
   $status=Get-DxfStatus
-  $requiredIndexerVersion='2.0.1'
+  $requiredIndexerVersion='2.0.2'
 
   if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'COMPLETE' -and
      [string]$status.indexerVersion -eq $requiredIndexerVersion -and
@@ -243,6 +243,32 @@ function Start-DxfScan([string]$root){
       ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
     }catch{}
 
+    Start-Sleep -Milliseconds 1200
+    try{
+      $alive=Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+      if(-not $alive){
+        $log=Join-Path $ROOT 'dxf-indexer.log'
+        $logTail=''
+        if(Test-Path -LiteralPath $log){
+          try{$logTail=(Get-Content -LiteralPath $log -Tail 8 -ErrorAction SilentlyContinue) -join ' | '}catch{}
+        }
+        $message='DXF indexer exited immediately after launch.'
+        if($logTail){$message+=' '+$logTail}
+        $failed=[pscustomobject]@{
+          state='FAILED'
+          indexerVersion=$requiredIndexerVersion
+          root=$root
+          filesFound=0
+          errors=1
+          message=$message
+          pid=$proc.Id
+          logFile=$log
+        }
+        try{($failed|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
+        return $failed
+      }
+    }catch{}
+
     return $starting
   }catch{
     $failed=[pscustomobject]@{
@@ -267,7 +293,7 @@ function Dxf-ShardKey([string]$part){
 function Get-DxfShardCandidates([string]$root,[string]$part){
   if([string]::IsNullOrWhiteSpace($root)){return @()}
   $status=Get-DxfStatus
-  if([string]$status.state -ne 'COMPLETE' -or [string]$status.root -ne [string]$root -or [string]$status.indexerVersion -ne '2.0.1'){return @()}
+  if([string]$status.state -ne 'COMPLETE' -or [string]$status.root -ne [string]$root -or [string]$status.indexerVersion -ne '2.0.2'){return @()}
   if(-not(Test-Path -LiteralPath $DXF_INDEX_DIR)){return @()}
 
   $shard=Join-Path $DXF_INDEX_DIR ((Dxf-ShardKey -part $part)+'.tsv')
@@ -523,7 +549,7 @@ function Handle-Request($req){
   }
   if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
     $status=Get-DxfStatus
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;started=$status.started;finished=$status.finished;currentPath=[string]$status.currentPath}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;started=$status.started;finished=$status.finished;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});logFile=[string]$status.logFile}}
   }
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
