@@ -186,6 +186,7 @@ function Start-DxfScan([string]$root){
 
   try{
     Remove-Item -LiteralPath ($DXF_INDEX_FILE+'.tmp') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath ($DXF_INDEX_DIR+'.tmp') -Recurse -Force -ErrorAction SilentlyContinue
 
     # Publish RUNNING before launching the worker. This removes the startup race
     # where the API could report IDLE for the first few hundred milliseconds.
