@@ -23,7 +23,7 @@ echo [CL-WS] Stopping any existing Creator bridge using this install...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $target=[IO.Path]::GetFullPath('%BRIDGE%\server.ps1'); Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.ProcessId -ne $PID -and [regex]::IsMatch([string]$_.CommandLine,[regex]::Escape($target)) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Start-Sleep -Milliseconds 500"
 echo.
 echo [CL-WS] Downloading server.ps1...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing -TimeoutSec 90 -Uri '%RAW%/server.ps1' -OutFile '%TMP%\server.ps1'; $t=Get-Content -Raw '%TMP%\server.ps1'; if($t -notmatch '\$BRIDGE_VERSION\s*=\s*''2\.3\.0'''){throw 'Downloaded server.ps1 is not bridge version 2.3.0.'}; $x=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile('%TMP%\server.ps1',[ref]$x,[ref]$e)|Out-Null;if($e.Count -gt 0){throw 'Downloaded server.ps1 failed PowerShell syntax validation.'}"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Invoke-WebRequest -UseBasicParsing -TimeoutSec 90 -Uri '%RAW%/server.ps1' -OutFile '%TMP%\server.ps1'; $t=Get-Content -Raw '%TMP%\server.ps1'; if($t -notmatch '\$BRIDGE_VERSION\s*=\s*''2\.3\.0'''){throw 'Downloaded server.ps1 is not bridge version 2.3.1.'}; $x=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile('%TMP%\server.ps1',[ref]$x,[ref]$e)|Out-Null;if($e.Count -gt 0){throw 'Downloaded server.ps1 failed PowerShell syntax validation.'}"
 if errorlevel 1 goto FAIL
 
 echo [CL-WS] Downloading dxf-indexer.ps1...
@@ -40,11 +40,11 @@ copy /y "%TMP%\dxf-indexer.ps1" "%BRIDGE%\dxf-indexer.ps1" >nul
 copy /y "%TMP%\create-sigmanest-ws.ps1" "%BRIDGE%\create-sigmanest-ws.ps1" >nul
 
 echo [CL-WS] Confirming installed version...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t=Get-Content -Raw '%BRIDGE%\server.ps1'; if($t -notmatch '\$BRIDGE_VERSION\s*=\s*''2\.3\.0'''){throw 'Installed bridge is not version 2.3.0.'}; Write-Host '[CL-WS] Installed bridge version: 2.3.0' -ForegroundColor Green"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t=Get-Content -Raw '%BRIDGE%\server.ps1'; if($t -notmatch '\$BRIDGE_VERSION\s*=\s*''2\.3\.0'''){throw 'Installed bridge is not version 2.3.1.'}; Write-Host '[CL-WS] Installed bridge version: 2.3.1' -ForegroundColor Green"
 if errorlevel 1 goto FAIL
 
 echo.
-echo [CL-WS] Starting bridge 2.3.0 on http://127.0.0.1:17832
+echo [CL-WS] Starting bridge 2.3.1 on http://127.0.0.1:17832
 echo [CL-WS] Leave this window open while using Excel.
 echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BRIDGE%\server.ps1"
