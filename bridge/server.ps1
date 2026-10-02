@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.5.0'
+$BRIDGE_VERSION = '2.6.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -518,44 +518,18 @@ function Candidate-Score($candidate,[string]$clMat,[string]$clThk,[string]$match
 function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[string]$matchType='EXACT') {
   $c=@(Deduplicate-Candidates $candidates)
   if($c.Count -eq 0){return $null}
-  if($c.Count -eq 1){return $c[0]}
 
-  $scored=@()
-  foreach($candidate in $c){
-    $scored += [pscustomobject]@{
-      candidate=$candidate
-      score=(Candidate-Score -candidate $candidate -clMat $clMat -clThk $clThk -matchType $matchType)
-    }
-  }
-  $ordered=@($scored|Sort-Object -Property score -Descending)
+  # Geometry-source rule:
+  # 1) If any PRS matches at this stage, use the first PRS found.
+  # 2) Only when no PRS exists, use the first DXF found.
+  # This deliberately avoids treating multiple geometry files as ambiguous.
+  $prs=@($c|Where-Object {[string]$_.fileType -eq 'PRS'})
+  if($prs.Count -gt 0){return $prs[0]}
 
-  if($ordered.Count -eq 1){return $ordered[0].candidate}
-  $best=[int]$ordered[0].score
-  $second=[int]$ordered[1].score
+  $dxf=@($c|Where-Object {[string]$_.fileType -eq 'DXF'})
+  if($dxf.Count -gt 0){return $dxf[0]}
 
-  # A clear metadata-based advantage is safe to use. A tie remains review.
-  if($best -gt $second -and ($best-$second) -ge 40){
-    return $ordered[0].candidate
-  }
-
-  # If exactly one PRS survives the scoring meaningfully above all DXFs, prefer it.
-  $topPrs=@($ordered|Where-Object {$_.candidate.fileType -eq 'PRS' -and $_.score -eq $best})
-  if($topPrs.Count -eq 1 -and $best -gt $second){
-    return $topPrs[0].candidate
-  }
-
-  return [pscustomobject]@{
-    ambiguous=@($ordered|ForEach-Object {$_.candidate})
-    candidateScores=@($ordered|ForEach-Object{
-      [pscustomobject]@{
-        file=[string]$_.candidate.file
-        fileType=[string]$_.candidate.fileType
-        likelyMaterial=[string]$_.candidate.likelyMaterial
-        thickness=[string]$_.candidate.thickness
-        score=[int]$_.score
-      }
-    })
-  }
+  return $c[0]
 }
 
 function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
