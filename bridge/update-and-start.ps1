@@ -124,11 +124,29 @@ try{
   $extract=Join-Path $tmpRoot 'repository'
   $archiveUrl="https://github.com/$Repo/archive/refs/heads/$Branch.zip"
   Say 'Downloading the current repository archive...'
-  Invoke-WebRequest -Uri $archiveUrl -OutFile $zip -UseBasicParsing -TimeoutSec 180 -Headers @{
-    'User-Agent'='CL-WS-Creator-Updater'
-    'Cache-Control'='no-cache'
+  $archiveUrls=@(
+    $archiveUrl,
+    "https://codeload.github.com/$Repo/zip/refs/heads/$Branch"
+  )
+  $downloaded=$false
+  $archiveErrors=@()
+  foreach($candidateUrl in $archiveUrls){
+    try{
+      Invoke-WebRequest -Uri $candidateUrl -OutFile $zip -UseBasicParsing -TimeoutSec 180 -Headers @{
+        'User-Agent'='CL-WS-Creator-Updater'
+        'Cache-Control'='no-cache'
+      }
+      if((Test-Path -LiteralPath $zip) -and (Get-Item -LiteralPath $zip).Length -gt 100){
+        $downloaded=$true
+        break
+      }
+    }catch{
+      $archiveErrors+=($candidateUrl+': '+$_.Exception.Message)
+    }
   }
-  if(-not(Test-Path -LiteralPath $zip)){throw 'GitHub repository archive download did not produce a file.'}
+  if(-not $downloaded){
+    throw ('Could not download the GitHub repository archive. '+($archiveErrors -join ' | '))
+  }
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
   $archiveRoot=@(Get-ChildItem -LiteralPath $extract -Directory -ErrorAction Stop|Select-Object -First 1)
