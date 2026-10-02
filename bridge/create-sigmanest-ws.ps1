@@ -1,8 +1,18 @@
-param([Parameter(Mandatory=$true)][string]$RequestFile)
+param([Parameter(Mandatory=$true)][string]$RequestFile,[string]$ResultFile)
 $ErrorActionPreference='Stop'
-$CREATOR_VERSION='3.2.1'
+$CREATOR_VERSION='3.2.2'
 
-function Out($o){$o|ConvertTo-Json -Depth 16 -Compress}
+function Out($o){
+  $json=$o|ConvertTo-Json -Depth 16 -Compress
+  if(-not [string]::IsNullOrWhiteSpace($ResultFile)){
+    try{
+      $parent=Split-Path -Parent $ResultFile
+      if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
+      [IO.File]::WriteAllText($ResultFile,$json,(New-Object System.Text.UTF8Encoding($false)))
+    }catch{}
+  }
+  Write-Output $json
+}
 
 function Invoke-ComMethod($obj,[string]$name,[object[]]$args=@()){
   $obj.GetType().InvokeMember(
