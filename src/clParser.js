@@ -73,12 +73,13 @@
       // A part appearing with different material or thickness remains separate,
       // and is explicitly flagged so the build/review step cannot combine it silently.
       const key=[normalize(r.part).toUpperCase(),normalizeMaterial(r.material).toUpperCase(),normalize(r.thickness).toUpperCase()].join('|');
-      if(!map.has(key))map.set(key,{...r,sourceSheets:[r.sheet],sourceRows:[r.sourceRow]});
+      if(!map.has(key))map.set(key,{...r,sourceSheets:[r.sheet],sourceRows:[r.sourceRow],taskBatches:[{sheet:r.sheet,batchMultiplier:r.batchMultiplier,vehicleQty:r.baseQty}]});
       else{
         const x=map.get(key);
         x.qty+=r.qty;
         x.sourceSheets.push(r.sheet);
         x.sourceRows.push(r.sourceRow);
+        x.taskBatches.push({sheet:r.sheet,batchMultiplier:r.batchMultiplier,vehicleQty:r.baseQty});
       }
     }
 
