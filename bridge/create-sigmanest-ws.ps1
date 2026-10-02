@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile)
 $ErrorActionPreference='Stop'
-$CREATOR_VERSION='3.2.0'
+$CREATOR_VERSION='3.2.1'
 
 function Out($o){$o|ConvertTo-Json -Depth 16 -Compress}
 
@@ -111,8 +111,23 @@ try{
   $auto=New-Object -ComObject SigmaNEST.SNAutomation
   $paths=New-Object -ComObject SigmaNEST.SNPaths
 
-  $wsDir=$req.wsDirectory
-  if([string]::IsNullOrWhiteSpace([string]$wsDir)){ $wsDir=$paths.GetPath(0) }
+  $wsDir=[string]$req.wsDirectory
+  if([string]::IsNullOrWhiteSpace($wsDir)){
+    try{$wsDir=[string]$paths.GetPath(0)}catch{$wsDir=''}
+  }
+  if([string]::IsNullOrWhiteSpace($wsDir)){
+    $libRoot=[string]$req.libraryRoot
+    if(-not [string]::IsNullOrWhiteSpace($libRoot)){
+      try{
+        $parent=[IO.Directory]::GetParent($libRoot)
+        if($parent){$wsDir=Join-Path -Path $parent.FullName -ChildPath 'WS'}
+      }catch{}
+    }
+  }
+  if([string]::IsNullOrWhiteSpace($wsDir)){
+    throw 'SigmaNEST WS output folder could not be determined. Configure the SigmaNEST WS folder (PathID 0) or verify the PRS library path.'
+  }
+  $wsDir=[IO.Path]::GetFullPath($wsDir.Trim())
   if(-not(Test-Path -LiteralPath $wsDir)){New-Item -ItemType Directory -Path $wsDir -Force|Out-Null}
 
   $job=[string]$req.jobName
