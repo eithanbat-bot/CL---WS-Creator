@@ -1,6 +1,19 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile,[string]$ResultFile)
 $ErrorActionPreference='Stop'
-$CREATOR_VERSION='3.2.2'
+$CREATOR_VERSION='3.2.3'
+
+function Write-Diagnostic([string]$message,[string]$phase='STARTUP',[int]$exitCode=1){
+  if(-not [string]::IsNullOrWhiteSpace($ResultFile)){
+    try{
+      $parent=Split-Path -Parent $ResultFile
+      if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
+      $obj=[ordered]@{ok=$false;creatorVersion=$CREATOR_VERSION;phase=$phase;exitCode=$exitCode;error=$message;requestFile=$RequestFile}
+      [IO.File]::WriteAllText($ResultFile,($obj|ConvertTo-Json -Depth 8 -Compress),(New-Object System.Text.UTF8Encoding($false)))
+    }catch{}
+  }
+}
+
+Write-Diagnostic 'SigmaNEST creator process started.' 'STARTUP' 0
 
 function Out($o){
   $json=$o|ConvertTo-Json -Depth 16 -Compress
@@ -116,11 +129,14 @@ function Add-GeometryToWorkspace($app,[string]$sourcePath,[string]$sourceType){
 }
 
 try{
+  $phase='READ_REQUEST'
   $req=Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8|ConvertFrom-Json
+  $phase='CREATE_COM'
   $app=New-Object -ComObject SigmaNEST.SNApp
   $auto=New-Object -ComObject SigmaNEST.SNAutomation
   $paths=New-Object -ComObject SigmaNEST.SNPaths
 
+  $phase='RESOLVE_WS_PATH'
   $wsDir=[string]$req.wsDirectory
   if([string]::IsNullOrWhiteSpace($wsDir)){
     try{$wsDir=[string]$paths.GetPath(0)}catch{$wsDir=''}
@@ -148,11 +164,13 @@ try{
   $wsPath=Join-Path -Path $wsDir -ChildPath ($safe+'.ws')
   if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
 
+  $phase='SIGMANEST_FILENEW'
   $auto.FileNew()
   try{$app.PartsLibrary.Directory=[string]$req.libraryRoot}catch{}
 
   $created=@()
   foreach($x in @($req.parts)){
+    $phase='IMPORT_PART'
     $sourcePath=[string]$x.sourcePath
     $sourceType=[string]$x.sourceType
     if([string]::IsNullOrWhiteSpace($sourcePath)){
@@ -195,6 +213,7 @@ try{
   }
 
   try{Invoke-ComMethod $app 'CreateTasksListForNewPartsInWS' @()|Out-Null}catch{}
+  $phase='SAVE_WS'
   Invoke-ComMethod $app 'SaveWorkSpaceFile' @([string]$wsPath) | Out-Null
   try{$app.LoadWorkSpaceFile($wsPath)}catch{}
   try{$app.RefreshTreeView()}catch{}
@@ -209,6 +228,8 @@ try{
     message=('SigmaNEST WS created: '+$wsPath)
   }|Out
 }catch{
+  $err=$_.Exception.Message
+  Write-Diagnostic $err $phase 1
   [pscustomobject]@{
     ok=$false
     creatorVersion=$CREATOR_VERSION
