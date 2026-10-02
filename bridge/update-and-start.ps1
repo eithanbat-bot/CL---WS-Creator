@@ -61,13 +61,6 @@ function Invoke-Json([string]$Url){
   }
 }
 
-function Get-LatestCommitSha(){
-  $commit=Invoke-Json ("https://api.github.com/repos/"+$Repo+"/commits/"+$Branch)
-  $sha=[string]$commit.sha
-  if($sha -notmatch '^[0-9a-fA-F]{40}$'){throw 'GitHub did not return a valid commit SHA for main.'}
-  return $sha
-}
-
 function Download-Verified([string]$Url,[string]$ApiUrl,[string]$Destination,[string]$ExpectedSha){
   $parent=Split-Path -Parent $Destination
   if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
@@ -125,10 +118,7 @@ $tmpRoot=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-update-'+[Guid]::NewGuid()
 try{
   New-Item -ItemType Directory -Path $tmpRoot -Force|Out-Null
   Say 'Checking GitHub for the newest bridge runtime...'
-  $latestCommit=Get-LatestCommitSha
-  Say "GitHub main commit: $($latestCommit.Substring(0,8))" 'Cyan'
-
-  # Download one repository archive instead of making a separate API request
+    # Download one repository archive instead of making a separate API request
   # for every bridge file. This avoids GitHub API rate limits/403 responses.
   $zip=Join-Path $tmpRoot 'repository.zip'
   $extract=Join-Path $tmpRoot 'repository'
@@ -172,7 +162,6 @@ try{
 
   $remoteServer=Join-Path $tmpRoot 'stage-server.ps1'
   if(-not(Test-Path -LiteralPath $remoteServer)){throw 'GitHub bridge does not contain server.ps1.'}
-  if(-not(Test-Path -LiteralPath $remoteServer)){throw 'GitHub bridge does not contain server.ps1.'}
   $remoteVersion=Get-Version $remoteServer
   if($remoteVersion -eq 'unknown' -or $remoteVersion -eq 'none'){throw 'GitHub server.ps1 does not publish a bridge version.'}
   Say "Latest bridge version on GitHub: $remoteVersion" 'Cyan'
@@ -192,7 +181,7 @@ try{
     $remoteManifest=Join-Path $tmpRoot 'manifest.xml'
     Say 'Checking local manifest.xml...'
     Invoke-WebRequest -Uri ($RawBase+'manifest.xml') -OutFile $remoteManifest -UseBasicParsing -TimeoutSec 120 -Headers @{'User-Agent'='CL-WS-Creator-Updater';'Cache-Control'='no-cache'}
-    try{$buildId=(Get-LatestCommitSha).Substring(0,8)}catch{throw ('Could not determine GitHub build id for manifest cache-busting: '+$_.Exception.Message)}
+    $buildId=($remoteVersion -replace '[^A-Za-z0-9]','')
     $manifestText=Get-Content -LiteralPath $remoteManifest -Raw -Encoding UTF8
     if($manifestText.Contains('__BUILD__')){
       $manifestText=$manifestText.Replace('__BUILD__',$buildId)
