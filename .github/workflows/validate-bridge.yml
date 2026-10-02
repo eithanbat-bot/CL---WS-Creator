@@ -120,7 +120,7 @@ jobs:
 
           if(-not $indexer.Contains('[IO.Directory]::EnumerateFiles')){throw 'DXF indexer is not using the streaming directory enumerator.'}
           if(-not $indexer.Contains('RequestFile')){throw 'DXF indexer does not support request-file startup.'}
-          if(-not $indexer.Contains("$DXF_INDEXER_VERSION = '3.0.0'")){throw 'DXF indexer version is not 3.0.0.'}
+          if(-not $indexer.Contains("$DXF_INDEXER_VERSION = '3.0.1'")){throw 'DXF indexer version is not 3.0.0.'}
           if(-not $indexer.Contains('WorkerBuckets') -and -not $indexer.Contains('controlled parallel workers')){throw 'DXF indexer does not contain the parallel-worker controller.'}
           if(-not $indexer.Contains('ReparsePoint')){throw 'DXF indexer does not protect against reparse-point recursion.'}
 
