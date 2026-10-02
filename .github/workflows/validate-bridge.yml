@@ -133,11 +133,12 @@ jobs:
           if([string]::IsNullOrWhiteSpace($indexerVersion) -or [string]::IsNullOrWhiteSpace($requiredVersion)){throw 'Could not read DXF indexer version declarations.'}
           if($indexerVersion -ne $requiredVersion){throw "Server requires DXF indexer $requiredVersion but indexer publishes $indexerVersion."}
 
-          if(-not $updater.Contains('function Get-GitBlobSha1')){throw 'Updater is missing Git blob integrity validation.'}
+          if(-not $updater.Contains('function Get-GitBlobSha1')){throw 'Updater is missing Git blob integrity helper.'}
           if(-not $updater.Contains('function Test-Syntax')){throw 'Updater is missing PowerShell syntax validation.'}
           if(-not $updater.Contains('$newFiles')){throw 'Updater rollback does not track newly created runtime files.'}
           if(-not $updater.Contains('dxf-index\.json') -or -not $updater.Contains('dxf-index-status\.json')){throw 'Updater does not preserve generated DXF index state.'}
           if(-not $updater.Contains('https://github.com/$Repo/archive/refs/heads/$Branch.zip')){throw 'Updater does not use the single GitHub repository archive.'}
+          if(-not $updater.Contains('Expand-Archive')){throw 'Updater does not extract the repository archive.'}
           if($updater.Contains('$ApiContents=')){throw 'Updater still contains the old per-file GitHub Contents API dependency.'}
 
           if(-not $bat.Contains('api.github.com/repos/eithanbat-bot/CL---WS-Creator/contents/bridge/update-and-start.ps1?ref=main')){throw 'Bootstrap launcher does not point to the GitHub Contents API self-updater.'}
@@ -147,5 +148,7 @@ jobs:
           if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
           if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
           if(-not $html.Contains('id="refreshDxf"')){throw 'Task pane HTML is missing the DXF refresh button.'}
+          if(-not $server.Contains("$BRIDGE_VERSION = '2.9.0'")){throw 'Bridge release is not 2.9.0.'}
+          if(-not (Get-Content -Raw -LiteralPath 'bridge/create-sigmanest-ws.ps1').Contains('$RequestFile,[string]$ResultFile')){throw 'SigmaNEST creator parameters are missing.'}
 
           Write-Host ("Architecture checks: OK. Bridge "+$bridgeVersion+" / DXF indexer "+$indexerVersion) -ForegroundColor Green
