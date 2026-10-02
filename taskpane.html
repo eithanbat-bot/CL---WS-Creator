@@ -49,9 +49,9 @@
     <label for="dxfPath">Main .DXF server folder</label>
     <div class="row">
       <input id="dxfPath" type="text" placeholder="Y:\">
-      <button id="scanLibrary" class="secondary" type="button">Scan Both</button>
+      <button id="scanLibrary" class="secondary" type="button">Check Libraries</button><button id="refreshDxf" class="secondary" type="button">Refresh DXF Now</button>
     </div>
-    <div id="libraryStatus" class="muted">PRS is searched recursively under S:\SNDataX1\PARTS and DXF is searched recursively under Y:\.</div>
+    <div id="libraryStatus" class="muted">PRS is searched recursively. DXF uses a persistent index under Y:\; the index is built in the background and refreshed overnight.</div>
   </section>
 
   <section class="card">
@@ -81,7 +81,7 @@
     </div>
   </section>
 
-  <footer><span>Build 2.4.0 — Self-updating bridge + recursive PRS/DXF libraries + background DXF index</span><span id="bridgeVersion">Local bridge: 127.0.0.1:17832</span></footer>
+  <footer><span>Build 2.5.0 — Persistent DXF index + parallel workers + automatic overnight refresh</span><span id="bridgeVersion">Local bridge: 127.0.0.1:17832</span></footer>
 </main>
 
 <script src="src/clParser.js?v=__BUILD__"></script>
