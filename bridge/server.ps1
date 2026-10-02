@@ -2,10 +2,11 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.8.2'
+$BRIDGE_VERSION = '2.8.3'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
+$BridgeDir = $ROOT
 $CFG_FILE = Join-Path $ROOT 'config.json'
 $DXF_INDEX_FILE = Join-Path $ROOT 'dxf-index.json'
 $DXF_INDEX_DIR = Join-Path $ROOT 'dxf-index'
