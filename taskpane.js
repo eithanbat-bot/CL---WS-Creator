@@ -93,8 +93,10 @@ async function writeReportSheets(result,job,selectedSheetNames){
     ['RESULT','VALUE'],
     ['Consolidated CL lines',parts.length],
     ['Total required quantity',sumQty(parts)],
-    ['Ready for SigmaNEST',ready.length],
+    ['Ready status',ready.length],
     ['Review required',review.length],
+    ['Imported into WS',(result.importedCount!=null?result.importedCount:ready.length)+" of "+parts.length],
+    ['Missing geometry',(result.missingCount!=null?result.missingCount:missing.length)],
     ['PRS geometry matches',prs.length],
     ['DXF geometry matches',dxf.length],
     ['Missing geometry',missing.length],
@@ -105,7 +107,7 @@ async function writeReportSheets(result,job,selectedSheetNames){
     ['',''],
     ['ACTION / HAND-OFF','DETAIL'],
     ['Geometry search','Recursive .PRS search under the PRS root and indexed .DXF search under the DXF root, including all subfolders'],
-    ['SigmaNEST WS',result.wsPath||'Not created — review items remain'],
+    ['SigmaNEST WS',result.wsPath||'Not created — no geometry was available to import'],
     ['Staging folder',result.outputDir||''],
     ['Part review sheet','See "Part Review" worksheet for every item requiring confirmation']
   ];
@@ -422,6 +424,9 @@ async function build(){
     $('geometryFound').textContent=ready;
     $('geometryMissing').textContent=out.length-ready;
     var msg=r.message||'Job staged.';
+    if(r.wsPath)msg+=' WS: '+r.wsPath+'.';
+    if(r.importedCount!=null)msg+=' Imported into WS: '+r.importedCount+'.';
+    if(r.missingCount!=null&&r.missingCount>0)msg+=' Missing geometry: '+r.missingCount+'.';
     if(r.reviewCount&&r.reviewBreakdown)msg+=' Reasons: '+reviewBreakdownText(r.reviewBreakdown)+'.';
     try{
       await writeReportSheets(r,job,selectedNames);
