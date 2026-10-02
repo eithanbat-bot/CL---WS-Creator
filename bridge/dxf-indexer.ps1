@@ -78,6 +78,22 @@ function Is-ReparseDirectory([string]$path){
   }
 }
 
+$INDEXER_IS_WINDOWS=([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)
+
+function Get-DxfFiles([string]$dir){
+  if($INDEXER_IS_WINDOWS){
+    [IO.Directory]::EnumerateFiles($dir,'*.dxf',[IO.SearchOption]::TopDirectoryOnly)
+    return
+  }
+  foreach($candidate in [IO.Directory]::EnumerateFiles($dir,'*',[IO.SearchOption]::TopDirectoryOnly)){
+    try{
+      if([string]::Equals([IO.Path]::GetExtension($candidate),'.dxf',[StringComparison]::OrdinalIgnoreCase)){
+        $candidate
+      }
+    }catch{}
+  }
+}
+
 $started=(Get-Date).ToUniversalTime().ToString('o')
 try{
   New-Item -ItemType Directory -Path $STATUS_PARENT -Force -ErrorAction SilentlyContinue|Out-Null
@@ -143,7 +159,7 @@ try{
     try{
       $writers=New-Object 'System.Collections.Generic.Dictionary[string,object]'
       try{
-        foreach($file in [IO.Directory]::EnumerateFiles($dir,'*.dxf',[IO.SearchOption]::TopDirectoryOnly)){
+        foreach($file in (Get-DxfFiles -dir $dir)){
           $count++
           $partName=[IO.Path]::GetFileNameWithoutExtension($file)
           $key=Shard-Key $partName
