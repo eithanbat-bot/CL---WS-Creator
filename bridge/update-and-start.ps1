@@ -64,7 +64,11 @@ function Invoke-Json([string]$Url){
 function Get-LatestCommitSha(){
   $commit=Invoke-Json ("https://api.github.com/repos/"+$Repo+"/commits/"+$Branch)
   $sha=[string]$commit.sha
-  if($sha -notmatch '^[0-9a-fA-F]{40}
+  if($sha -notmatch '^[0-9a-fA-F]{40}$'){throw 'GitHub did not return a valid commit SHA for main.'}
+  return $sha
+}
+
+function Download-Verified([string]$Url,[string]$Destination,[string]$ExpectedSha){
   $parent=Split-Path -Parent $Destination
   if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
   $tmp=$Destination+'.download'
