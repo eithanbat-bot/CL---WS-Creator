@@ -906,9 +906,10 @@ function Handle-Request($req){
       # stdout and stderr are preserved even when COM initialization crashes.
       $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
       $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
+      $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
       $psi=New-Object System.Diagnostics.ProcessStartInfo
       $psi.FileName=Get-PowerShellExe
-      $psi.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$reqFile+'"'
+      $psi.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$reqFile+'" -ResultFile "'+$creatorResult+'"'
       $psi.WorkingDirectory=$BridgeDir
       $psi.UseShellExecute=$false
       $psi.CreateNoWindow=$true
@@ -931,10 +932,13 @@ function Handle-Request($req){
       [string]$stderr|Set-Content -LiteralPath $creatorErr -Encoding UTF8
       $rawText=([string]$stdout).Trim()
       $errText=([string]$stderr).Trim()
+      if([string]::IsNullOrWhiteSpace($rawText) -and (Test-Path -LiteralPath $creatorResult)){
+        try{$rawText=[string](Get-Content -LiteralPath $creatorResult -Raw -Encoding UTF8).Trim()}catch{}
+      }
       if([string]::IsNullOrWhiteSpace($rawText)){
-        $detail='SigmaNEST creator returned no stdout. Exit code: '+$exitCode+'.'
+        $detail='SigmaNEST creator returned no result. Exit code: '+$exitCode+'.'
         if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' STDERR: '+$errText}
-        $detail+=' Creator output files: '+$creatorOut+' ; '+$creatorErr
+        $detail+=' Creator output files: '+$creatorOut+' ; '+$creatorErr+' ; '+$creatorResult
         throw $detail
       }
       try{$data=$rawText|ConvertFrom-Json}catch{
