@@ -7,18 +7,23 @@ $runtime=Join-Path $root 'runtime'
 $indexFile=Join-Path $runtime 'dxf-index.json'
 $statusFile=Join-Path $runtime 'dxf-index-status.json'
 try{
-  New-Item -ItemType Directory -Path (Join-Path $root 'A FolderNested One') -Force|Out-Null
-  New-Item -ItemType Directory -Path (Join-Path $root 'B Folder') -Force|Out-Null
+  $dirA=Join-Path $root 'A Folder'
+  $dirNested=Join-Path $dirA 'Nested One'
+  $dirB=Join-Path $root 'B Folder'
+  New-Item -ItemType Directory -Path $dirNested -Force|Out-Null
+  New-Item -ItemType Directory -Path $dirB -Force|Out-Null
+
   $files=@(
-    (Join-Path $root 'A Folderone.DXF'),
-    (Join-Path $root 'A FolderNested One	wo.dxf'),
-    (Join-Path $root 'B Folder	hree.DxF')
+    (Join-Path $dirA 'one.DXF'),
+    (Join-Path $dirNested 'two.dxf'),
+    (Join-Path $dirB 'three.DxF')
   )
   foreach($f in $files){Set-Content -LiteralPath $f -Value '0' -Encoding ASCII}
-  Set-Content -LiteralPath (Join-Path $root 'B Folderignore.txt') -Value '0' -Encoding ASCII
+  Set-Content -LiteralPath (Join-Path $dirB 'ignore.txt') -Value '0' -Encoding ASCII
 
   $requestFile=Join-Path $runtime 'dxf-index-request.json'
   @{Root=$root;IndexFile=$indexFile;StatusFile=$statusFile}|ConvertTo-Json|Set-Content -LiteralPath $requestFile -Encoding UTF8
+
   & (Get-Command pwsh -ErrorAction Stop).Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath -RequestFile $requestFile
   if($LASTEXITCODE -ne 0){throw "DXF indexer exited with code $LASTEXITCODE"}
   if(Test-Path -LiteralPath $requestFile){throw 'DXF indexer did not consume its request file.'}
@@ -41,8 +46,7 @@ try{
   }
   $allText=$lines -join [Environment]::NewLine
   foreach($f in $files){
-    $normalized=[regex]::Escape($f.Replace('','/'))
-    if($allText.Replace('','/') -notmatch $normalized){throw "Indexed path missing: $f"}
+    if(-not $allText.Contains($f)){throw "Indexed path missing: $f"}
   }
 
   Write-Host 'DXF indexer end-to-end test: OK' -ForegroundColor Green
