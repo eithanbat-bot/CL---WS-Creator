@@ -1,0 +1,162 @@
+name: Validate bridge and web files
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            'bridge/server.ps1',
+            'bridge/create-sigmanest-ws.ps1',
+            'bridge/dxf-indexer.ps1',
+            'bridge/update-and-start.ps1',
+            'tests/test-dxf-indexer.ps1'
+          )
+
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) {
+              throw "Missing required PowerShell file: $file"
+            }
+
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+
+            if ($errors.Count -gt 0) {
+              Write-Host "$file has PowerShell parse errors:" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+              exit 1
+            }
+
+            Write-Host "$file syntax: OK" -ForegroundColor Green
+          }
+
+      - name: Validate web files
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check taskpane.js
+          node --check src/clParser.js
+          echo "JavaScript syntax: OK"
+
+      - name: Validate CL parser behaviour
+        shell: node
+        run: |
+          const fs=require('fs');
+          global.window={};
+          eval(fs.readFileSync('src/clParser.js','utf8'));
+          const p=window.CLParser.parseSheet([
+            ['Part','Qty','Material','Thickness'],
+            ['TEST-001',3,'S355','6mm']
+          ],{sheet:'BAT TEST (x2)'})[0];
+          if(!p) throw new Error('Parser returned no row');
+          if(p.baseQty!==3 || p.batchMultiplier!==2 || p.qty!==6) {
+            throw new Error('Batch multiplier logic failed: '+JSON.stringify(p));
+          }
+          console.log('CL parser behaviour: OK');
+
+      - name: Validate DXF indexer end-to-end
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & (Join-Path $PWD 'tests/test-dxf-indexer.ps1')
+
+      - name: Validate manifest XML
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $xml = [xml](Get-Content -Raw -LiteralPath 'manifest.xml')
+          if (-not $xml.OfficeApp) {
+            throw 'manifest.xml did not parse as an OfficeApp manifest.'
+          }
+
+          $source = [string]$xml.OfficeApp.DefaultSettings.SourceLocation.DefaultValue
+          if ($source -notmatch '^https://eithanbat-bot\.github\.io/CL---WS-Creator/taskpane\.html') {
+            throw "manifest.xml SourceLocation is unexpected: $source"
+          }
+
+          Write-Host 'manifest.xml: OK' -ForegroundColor Green
+
+      - name: Validate architecture and launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $server = Get-Content -Raw -LiteralPath 'bridge/server.ps1'
+          $indexer = Get-Content -Raw -LiteralPath 'bridge/dxf-indexer.ps1'
+          $updater = Get-Content -Raw -LiteralPath 'bridge/update-and-start.ps1'
+          $taskpane = Get-Content -Raw -LiteralPath 'taskpane.js'
+          $html = Get-Content -Raw -LiteralPath 'taskpane.html'
+          $bat = Get-Content -Raw -LiteralPath 'Start Bridge Fixed.bat'
+
+          if ($server -notmatch 'function Start-DxfScan') {
+            throw 'Server does not contain Start-DxfScan.'
+          }
+          if ($server -notmatch "function Get-DxfShardCandidates") {
+            throw 'Server does not contain the sharded DXF index reader.'
+          }
+          if ($server -match 'Get-ChildItem[^\r\n]*\\dxfRoot[^\r\n]*-Recurse') {
+            throw 'Server must never recursively enumerate the DXF root during an HTTP request.'
+          }
+          if ($server -match 'Get-GeometryFiles\s+-root\s+\$dxfRoot') {
+            throw 'Server must not use the synchronous Get-GeometryFiles walk for Y:\.'
+          }
+          if ($server -notmatch "dxfStatus\.state.*COMPLETE") {
+            throw 'Server is missing the DXF readiness check.'
+          }
+          if ($server -notmatch "DXF_INDEX_NOT_READY") {
+            throw 'Server build API does not reject incomplete DXF indexes.'
+          }
+          if ($server -notmatch "FOUND - DXF") {
+            throw 'Server does not have the DXF-ready status path.'
+          }
+
+          if (-not $indexer.Contains('[IO.Directory]::EnumerateFiles')) {
+            throw 'DXF indexer is not using the streaming directory enumerator.'
+          }
+          $indexerVersionMatch=[regex]::Match($indexer,"$DXF_INDEXER_VERSIONs*=s*'([^']+)'")
+          if(-not $indexerVersionMatch.Success){throw 'DXF indexer version is not declared.'}
+          $indexerVersion=$indexerVersionMatch.Groups[1].Value
+          $requiredIndexerMatch=[regex]::Match($server,"\$requiredIndexerVersion\s*=\s*'([^']+)'")
+          if(-not $requiredIndexerMatch.Success){throw 'Server required DXF indexer version is not declared.'}
+          if($requiredIndexerMatch.Groups[1].Value -ne $indexerVersion){throw "Server requires DXF indexer $($requiredIndexerMatch.Groups[1].Value) but indexer publishes $indexerVersion."}
+          if ($indexer -notmatch 'indexerVersion=') {
+            throw 'DXF status does not publish indexerVersion.'
+          }
+
+          if ($updater -notmatch 'function Test-Syntax') {
+            throw 'Updater is missing downloaded PowerShell syntax validation.'
+          }
+          if (-not $updater.Contains('$_.path -like ''bridge/*''')) {
+            throw 'Updater does not discover bridge files from the GitHub tree.'
+          }
+          if ($updater -notmatch 'dxf-index\\.json' -or $updater -notmatch 'dxf-index-status\\.json') {
+            throw 'Updater does not preserve generated DXF index state.'
+          }
+
+          if ($bat -notmatch 'raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge') {
+            throw 'Launcher is not configured to download the current Creator bridge from GitHub.'
+          }
+          if ($bat -notmatch '2\.3\.1') {
+            throw 'Launcher does not verify/install bridge version 2.3.1.'
+          }
+          if ($taskpane -notmatch 'Start Bridge Fixed\.bat') {
+            throw 'Task pane still instructs users to start the obsolete launcher name.'
+          }
+          if ($html -notmatch 'taskpane\.js\?v=') {
+            throw 'Task pane cache-busting is missing.'
+          }
+
+          Write-Host 'Architecture checks: OK' -ForegroundColor Green
