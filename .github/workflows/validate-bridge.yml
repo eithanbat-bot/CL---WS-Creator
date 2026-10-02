@@ -82,7 +82,7 @@ jobs:
           $manifestText=Get-Content -Raw -LiteralPath 'manifest.xml'
           $xml=[xml]$manifestText
           if(-not $xml.DocumentElement){throw 'manifest.xml did not parse as XML.'}
-          if(-not $manifestText.Contains('https://eithanbat.github.io/CL---WS-Creator/taskpane.html')){throw 'manifest.xml does not contain the GitHub Pages task pane URL.'}
+          if(-not $manifestText.Contains('https://eithanbat-bot.github.io/CL---WS-Creator/taskpane.html')){throw 'manifest.xml does not contain the GitHub Pages task pane URL.'}
           if(-not $manifestText.Contains('<Host Name="Workbook"/>')){throw 'Manifest does not target Excel Workbook.'}
           if(-not $manifestText.Contains('<Permissions>ReadWriteDocument</Permissions>')){throw 'Manifest permissions are missing.'}
           Write-Host 'manifest.xml: OK' -ForegroundColor Green
