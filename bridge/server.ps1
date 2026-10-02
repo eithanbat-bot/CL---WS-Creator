@@ -310,9 +310,15 @@ function Dxf-ShardKey([string]$part){
 
 function Get-DxfShardCandidates([string]$root,[string]$part){
   if([string]::IsNullOrWhiteSpace($root)){return @()}
-  $status=Get-DxfStatus
-  if([string]$status.state -ne 'COMPLETE' -or -not ([string]$status.root).Equals([string]$root,[StringComparison]::OrdinalIgnoreCase) -or [string]$status.indexerVersion -ne '3.0.0'){return @()}
+  if(-not(Test-Path -LiteralPath $DXF_INDEX_FILE)){return @()}
   if(-not(Test-Path -LiteralPath $DXF_INDEX_DIR)){return @()}
+
+  try{
+    $manifest=Get-Content -LiteralPath $DXF_INDEX_FILE -Raw -Encoding UTF8|ConvertFrom-Json
+    if([string]$manifest.schema -ne 'cl-ws-creator/dxf-index/3'){return @()}
+    if(-not ([string]$manifest.root).Equals([string]$root,[StringComparison]::OrdinalIgnoreCase)){return @()}
+    if([string]$manifest.indexerVersion -ne '3.0.0'){return @()}
+  }catch{return @()}
 
   $shard=Join-Path $DXF_INDEX_DIR ((Dxf-ShardKey -part $part)+'.tsv')
   if(-not(Test-Path -LiteralPath $shard)){return @()}
@@ -585,7 +591,7 @@ function Initialize-DxfScheduler(){
     $status=Get-DxfStatus
     if([string]$status.state -eq 'RUNNING'){return}
     if(-not(Test-Path -LiteralPath $DXF_INDEX_FILE) -or -not(Test-Path -LiteralPath $DXF_INDEX_DIR)){
-      Start-DxfScan -root $DEFAULT_DXF_LIBRARY -mode 'FULL' | Out-Null
+      Start-DxfScan -root ([string]$(if($CFG.dxfRoot){$CFG.dxfRoot}else{$DEFAULT_DXF_LIBRARY})) -mode 'FULL' | Out-Null
       return
     }
     try{
@@ -594,7 +600,7 @@ function Initialize-DxfScheduler(){
       $nightlyHour=[int]$CFG.dxfNightlyHour
       if($nightlyHour -lt 0 -or $nightlyHour -gt 23){$nightlyHour=2}
       if($age -ge [double]$CFG.dxfRefreshHours -and $hour -ge $nightlyHour -and $hour -lt ($nightlyHour+2)){
-        Start-DxfScan -root $DEFAULT_DXF_LIBRARY -mode 'REFRESH' -force | Out-Null
+        Start-DxfScan -root ([string]$(if($CFG.dxfRoot){$CFG.dxfRoot}else{$DEFAULT_DXF_LIBRARY})) -mode 'REFRESH' -force | Out-Null
       }
     }catch{}
   }catch{}
