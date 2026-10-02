@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.8.0'
+$BRIDGE_VERSION = '2.8.1'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -900,7 +900,7 @@ function Handle-Request($req){
     }
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
-      $worker=Join-Path $ROOT 'create-sigmanest-ws.ps1'
+      $worker=Join-Path $BridgeDir 'create-sigmanest-ws.ps1'
       $raw=& (Get-PowerShellExe) -NoProfile -ExecutionPolicy Bypass -File $worker -RequestFile $reqFile 2>&1 | Out-String
       $data=$raw.Trim()|ConvertFrom-Json
       if(-not$data.ok){throw $data.error}
