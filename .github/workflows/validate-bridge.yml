@@ -128,7 +128,7 @@ jobs:
           if(-not $updater.Contains('function Get-GitBlobSha1')){throw 'Updater is missing Git blob integrity validation.'}
           if(-not $updater.Contains('function Test-Syntax')){throw 'Updater is missing PowerShell syntax validation.'}
           if(-not $updater.Contains('$newFiles')){throw 'Updater rollback does not track newly created runtime files.'}
-          if(-not $updater.Contains('dxf-index.json') -or -not $updater.Contains('dxf-index-status.json')){throw 'Updater does not preserve generated DXF index state.'}
+          if(-not $updater.Contains('dxf-index\.json') -or -not $updater.Contains('dxf-index-status\.json')){throw 'Updater does not preserve generated DXF index state.'}
           if(-not $updater.Contains("'.path -like ''bridge/*''")){throw 'Updater does not discover bridge files from GitHub.'}
 
           if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the GitHub self-updater.'}
