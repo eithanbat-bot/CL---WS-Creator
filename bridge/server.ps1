@@ -21,7 +21,8 @@ try {
 } catch {}
 
 try {
-  if($null -eq $CFG.dxfWorkers){$CFG.dxfWorkers=12}
+  # DXF indexing is intentionally configured at the bridge maximum.
+  $CFG.dxfWorkers=12
   if($null -eq $CFG.dxfNightlyHour){$CFG.dxfNightlyHour=2}
   if($null -eq $CFG.dxfRefreshHours){$CFG.dxfRefreshHours=24}
   if($null -eq $CFG.dxfAutoRefresh){$CFG.dxfAutoRefresh=$true}
