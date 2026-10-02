@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.4.0'
+$BRIDGE_VERSION = '2.3.1'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -166,12 +166,6 @@ function Get-DxfStatus(){
   try{return (Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json)}catch{return [pscustomobject]@{state='UNKNOWN';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='Could not read DXF index status.'}}
 }
 
-function Get-PowerShellExe(){
-  $candidate=Join-Path $PSHOME 'powershell.exe'
-  if(Test-Path -LiteralPath $candidate){return $candidate}
-  return (Get-Command powershell.exe -ErrorAction Stop).Source
-}
-
 function Stop-RunningDxfWorkers([string]$root){
   try{
     $rootPattern=[regex]::Escape($root)
@@ -189,46 +183,34 @@ function Stop-RunningDxfWorkers([string]$root){
 
 function Start-DxfScan([string]$root){
   $status=Get-DxfStatus
-  $requiredIndexerVersion='2.1.0'
-  $rootFull=[IO.Path]::GetFullPath(([string]$root).Trim())
+  $requiredIndexerVersion='2.0.2'
 
-  $sameRoot=([string]$status.root).Equals($rootFull,[StringComparison]::OrdinalIgnoreCase)
-
-  if($sameRoot -and [string]$status.state -eq 'COMPLETE' -and
+  if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'COMPLETE' -and
      [string]$status.indexerVersion -eq $requiredIndexerVersion -and
      (Test-Path -LiteralPath $DXF_INDEX_FILE) -and
      (Test-Path -LiteralPath $DXF_INDEX_DIR)){
     return $status
   }
 
-  if($sameRoot -and [string]$status.state -eq 'RUNNING'){
+  if(([string]$status.root -eq [string]$root) -and [string]$status.state -eq 'RUNNING' -and
+     [string]$status.indexerVersion -eq $requiredIndexerVersion){
     try{
       if($status.pid){
         $p=Get-Process -Id ([int]$status.pid) -ErrorAction SilentlyContinue
         if($p){return $status}
       }
     }catch{}
-    $stale=[pscustomobject]@{
-      state='FAILED'
-      indexerVersion=$requiredIndexerVersion
-      root=$rootFull
-      filesFound=[int]$status.filesFound
-      errors=1
-      message='DXF indexer status was RUNNING but its recorded process no longer exists.'
-      pid=[int]$status.pid
-      logFile=[string]$status.logFile
-    }
-    try{($stale|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
-    $status=$stale
   }
 
-  Stop-RunningDxfWorkers -root $rootFull
+  # Only stop workers when the recorded worker is stale, missing, or belongs
+  # to an older indexer/root. A healthy current worker must never be restarted.
+  Stop-RunningDxfWorkers -root $root
 
   if(-not(Test-Path -LiteralPath $DXF_SCAN_SCRIPT)){
     return [pscustomobject]@{
       state='FAILED'
       indexerVersion=$requiredIndexerVersion
-      root=$rootFull
+      root=$root
       filesFound=0
       errors=1
       message='DXF indexer script is missing: '+$DXF_SCAN_SCRIPT
@@ -243,33 +225,30 @@ function Start-DxfScan([string]$root){
     $starting=[pscustomobject]@{
       state='RUNNING'
       indexerVersion=$requiredIndexerVersion
-      root=$rootFull
+      root=$root
       message='DXF indexing worker is starting.'
       filesFound=0
       errors=0
       started=$started
       finished=$null
-      currentPath=$rootFull
+      currentPath=$root
       pid=$null
-      logFile=(Join-Path $ROOT 'dxf-indexer.log')
-      stderrLogFile=(Join-Path $ROOT 'dxf-indexer-stderr.log')
-      launchLogFile=(Join-Path $ROOT 'dxf-indexer-launch.log')
     }
     ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
 
-    $requestFile=Join-Path $ROOT ('_dxf-index-request-'+[Guid]::NewGuid().ToString('N')+'.json')
-    $request=[ordered]@{Root=$rootFull;IndexFile=$DXF_INDEX_FILE;StatusFile=$DXF_STATUS_FILE;CreatedUtc=(Get-Date).ToUniversalTime().ToString('o')}
-    ($request|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $requestFile -Encoding UTF8
-
+    # Launch the worker through System.Diagnostics.Process so its
+    # stdout/stderr can be captured even when Windows PowerShell exits before
+    # the script gets far enough to create its own log.
+    $command="& '$DXF_SCAN_SCRIPT' -Root '$root' -IndexFile '$DXF_INDEX_FILE' -StatusFile '$DXF_STATUS_FILE'"
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $launchLog=Join-Path $ROOT 'dxf-indexer-launch.log'
     $stdoutLog=Join-Path $ROOT 'dxf-indexer-stdout.log'
     $stderrLog=Join-Path $ROOT 'dxf-indexer-stderr.log'
-    $psExe=Get-PowerShellExe
     try{
-      ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Launching '+$psExe+' -File '+$DXF_SCAN_SCRIPT+' -RequestFile '+$requestFile+' Root='+$rootFull)|Add-Content -LiteralPath $launchLog -Encoding UTF8
+      ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Launching powershell.exe via ProcessStartInfo. Script='+$DXF_SCAN_SCRIPT+' Root='+$root)|Add-Content -LiteralPath $launchLog -Encoding UTF8
       $psi=New-Object System.Diagnostics.ProcessStartInfo
-      $psi.FileName=$psExe
-      $psi.Arguments='-NoProfile -ExecutionPolicy Bypass -File "'+$DXF_SCAN_SCRIPT+'" -RequestFile "'+$requestFile+'"'
+      $psi.FileName='powershell.exe'
+      $psi.Arguments='-NoProfile -ExecutionPolicy Bypass -EncodedCommand '+$encoded
       $psi.WorkingDirectory=$ROOT
       $psi.UseShellExecute=$false
       $psi.CreateNoWindow=$true
@@ -277,18 +256,16 @@ function Start-DxfScan([string]$root){
       $psi.RedirectStandardError=$true
       $proc=[System.Diagnostics.Process]::Start($psi)
     }catch{
-      Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
       $message='Could not launch DXF indexer process: '+$_.Exception.Message
       $failed=[pscustomobject]@{
         state='FAILED'
         indexerVersion=$requiredIndexerVersion
-        root=$rootFull
+        root=$root
         filesFound=0
         errors=1
         message=$message
         pid=$null
-        logFile=$stdoutLog
-        stderrLogFile=$stderrLog
+        logFile=$stderrLog
         launchLogFile=$launchLog
       }
       try{($failed|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
@@ -297,12 +274,14 @@ function Start-DxfScan([string]$root){
 
     try{
       $starting.pid=$proc.Id
+      $starting.message='DXF indexer process launched (PID '+$proc.Id+'); waiting for the indexer heartbeat.'
+      $starting.logFile=$stdoutLog
+      $starting.launchLogFile=$launchLog
       ($starting|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
       ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Process launched. PID='+$proc.Id)|Add-Content -LiteralPath $launchLog -Encoding UTF8
     }catch{}
 
-    Start-Sleep -Milliseconds 1200
-
+    Start-Sleep -Milliseconds 2500
     try{
       if($proc.HasExited){
         $stdout=''
@@ -312,27 +291,14 @@ function Start-DxfScan([string]$root){
         try{if($stdout){$stdout|Set-Content -LiteralPath $stdoutLog -Encoding UTF8}}catch{}
         try{if($stderr){$stderr|Set-Content -LiteralPath $stderrLog -Encoding UTF8}}catch{}
         $exitCode=$proc.ExitCode
-
-        $current=Get-DxfStatus
-        if([string]$current.state -eq 'FAILED' -and [string]$current.root -eq $rootFull){
-          if([string]::IsNullOrWhiteSpace([string]$current.message)){
-            $current.message='DXF indexer exited with code '+$exitCode+'.'
-          }
-          $current.exitCode=$exitCode
-          $current.stderrLogFile=$stderrLog
-          $current.launchLogFile=$launchLog
-          try{($current|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8}catch{}
-          return $current
-        }
-
-        $parts=@('DXF indexer exited before reporting a complete run (exit code '+$exitCode+').')
+        $parts=@('DXF indexer exited immediately after launch (exit code '+$exitCode+').')
         if($stderr){$parts+=('STDERR: '+(($stderr -replace '\r?\n',' ') -replace '\s+',' ').Trim())}
         if($stdout){$parts+=('STDOUT: '+(($stdout -replace '\r?\n',' ') -replace '\s+',' ').Trim())}
         $message=$parts -join ' '
         $failed=[pscustomobject]@{
           state='FAILED'
           indexerVersion=$requiredIndexerVersion
-          root=$rootFull
+          root=$root
           filesFound=0
           errors=1
           message=$message
@@ -348,12 +314,12 @@ function Start-DxfScan([string]$root){
 
       try{
         $current=Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json
-        $current.message='DXF indexer process is alive (PID '+$proc.Id+'); background indexing is active.'
+        $current.message='DXF indexer process is alive (PID '+$proc.Id+'). Waiting for the first scan heartbeat.'
         $current.logFile=$stdoutLog
         $current.stderrLogFile=$stderrLog
         $current.launchLogFile=$launchLog
         ($current|ConvertTo-Json -Depth 8)|Set-Content -LiteralPath $DXF_STATUS_FILE -Encoding UTF8
-        ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Process still alive after 1.2 seconds. PID='+$proc.Id)|Add-Content -LiteralPath $launchLog -Encoding UTF8
+        ('['+(Get-Date).ToUniversalTime().ToString('o')+'] Process still alive after 2.5 seconds. PID='+$proc.Id)|Add-Content -LiteralPath $launchLog -Encoding UTF8
       }catch{}
     }catch{}
 
@@ -362,7 +328,7 @@ function Start-DxfScan([string]$root){
     $failed=[pscustomobject]@{
       state='FAILED'
       indexerVersion=$requiredIndexerVersion
-      root=$rootFull
+      root=$root
       filesFound=0
       errors=1
       message=$_.Exception.Message
@@ -637,7 +603,7 @@ function Handle-Request($req){
   }
   if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
     $status=Get-DxfStatus
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;started=$status.started;finished=$status.finished;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});exitCode=$(try{[int]$status.exitCode}catch{0});logFile=[string]$status.logFile;stderrLogFile=[string]$status.stderrLogFile;launchLogFile=[string]$status.launchLogFile}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;started=$status.started;finished=$status.finished;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});logFile=[string]$status.logFile}}
   }
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
@@ -776,7 +742,7 @@ function Handle-Request($req){
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
       $worker=Join-Path $ROOT 'create-sigmanest-ws.ps1'
-      $raw=& (Get-PowerShellExe) -NoProfile -ExecutionPolicy Bypass -File $worker -RequestFile $reqFile 2>&1 | Out-String
+      $raw=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $worker -RequestFile $reqFile 2>&1 | Out-String
       $data=$raw.Trim()|ConvertFrom-Json
       if(-not$data.ok){throw $data.error}
       return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message=$data.message;parts=$parts;reviewCount=0;sigmaNestCreated=$true;wsPath=$data.wsPath;sigmaPartCount=$data.partCount;taskPlan=@($parts|ForEach-Object{[pscustomobject]@{sheet=$_.sheet;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});part=$_.part;qty=$_.qty}})}}
