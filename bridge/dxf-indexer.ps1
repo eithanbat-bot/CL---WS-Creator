@@ -360,7 +360,7 @@ try {
 
   $cpu=[Environment]::ProcessorCount
   $workerCount=$requestedWorkers
-  if($workerCount -le 0){$workerCount=[math]::Min(8,[math]::Max(2,$cpu))}
+  if($workerCount -le 0){$workerCount=[math]::Min(12,[math]::Max(2,$cpu))}
   $workerCount=[math]::Max(1,[math]::Min(12,$workerCount))
   if($items.Count -lt $workerCount){$workerCount=[math]::Max(1,$items.Count)}
   if($workerCount -lt 1){$workerCount=1}
