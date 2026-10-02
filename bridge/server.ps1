@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.7.0'
+$BRIDGE_VERSION = '2.8.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -852,16 +852,102 @@ function Handle-Request($req){
       $reviewBreakdown[$reason]=[int]$reviewBreakdown[$reason]+1
     }
     $staging=Write-Job -root $root -name $name -parts $parts
-    if($review.Count -gt 0){return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message="Job staged, but $($review.Count) part(s) require review before SigmaNEST creation.";parts=$parts;reviewCount=$review.Count;reviewBreakdown=$reviewBreakdown;sigmaNestCreated=$false}}}
+
+    # Review no longer blocks WS creation. Any part with a resolved geometry
+    # source is handed to SigmaNEST, even when it is marked REVIEW so the
+    # operator can correct it directly in SigmaNEST. Only true MISSING rows
+    # have no geometry to import.
+    $importable=@($parts|Where-Object {-not [string]::IsNullOrWhiteSpace([string]$_.sourcePath)})
+    $missing=@($parts|Where-Object {$_.status -eq 'MISSING'})
+    if($importable.Count -eq 0){
+      return [pscustomobject]@{
+        Status=200
+        Data=@{
+          outputDir=$staging
+          message="No geometry could be imported into SigmaNEST. $($missing.Count) part(s) have missing geometry."
+          parts=$parts
+          reviewCount=$review.Count
+          reviewBreakdown=$reviewBreakdown
+          sigmaNestCreated=$false
+          sigmaPartCount=0
+          importedCount=0
+          missingCount=$missing.Count
+          taskPlan=@()
+        }
+      }
+    }
+
     $reqFile=Join-Path $ROOT ('_psrequest-'+[Diagnostics.Process]::GetCurrentProcess().Id+'-'+[DateTime]::Now.Ticks+'.json')
-    $request=[pscustomobject]@{jobName=$name;libraryRoot=$root;dxfRoot=$dxfRoot;wsDirectory=[string]$b.wsDirectory;parts=@($parts|ForEach-Object{[pscustomobject]@{part=$_.part;qty=$_.qty;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});taskSheet=$_.sheet;sourcePath=$_.sourcePath;sourceType=$_.sourceType;prsPath=$(if($_.sourceType -eq 'PRS'){[string]$_.sourcePath}else{''});sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial));thicknessMm=(Thickness-Number -s ([string]$_.thickness))}})}
+    $request=[pscustomobject]@{
+      jobName=$name
+      libraryRoot=$root
+      dxfRoot=$dxfRoot
+      wsDirectory=[string]$b.wsDirectory
+      parts=@($importable|ForEach-Object{
+        [pscustomobject]@{
+          part=$_.part
+          qty=$_.qty
+          batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1})
+          taskBatches=@($_.taskBatches)
+          taskSheet=$_.sheet
+          sourcePath=$_.sourcePath
+          sourceType=$_.sourceType
+          prsPath=$(if($_.sourceType -eq 'PRS'){[string]$_.sourcePath}else{''})
+          sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial))
+          thicknessMm=(Thickness-Number -s ([string]$_.thickness))
+        }
+      })
+    }
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
       $worker=Join-Path $ROOT 'create-sigmanest-ws.ps1'
       $raw=& (Get-PowerShellExe) -NoProfile -ExecutionPolicy Bypass -File $worker -RequestFile $reqFile 2>&1 | Out-String
       $data=$raw.Trim()|ConvertFrom-Json
       if(-not$data.ok){throw $data.error}
-      return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message=$data.message;parts=$parts;reviewCount=0;sigmaNestCreated=$true;wsPath=$data.wsPath;sigmaPartCount=$data.partCount;taskPlan=@($parts|ForEach-Object{if($_.taskBatches){@($_.taskBatches|ForEach-Object{[pscustomobject]@{sheet=$_.sheet;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});part=$_.part;qty=$_.vehicleQty}})}else{[pscustomobject]@{sheet=$_.sheet;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});part=$_.part;qty=$_.qty}}})}}
+
+      $taskPlan=@()
+      foreach($p0 in @($parts)){
+        if($p0.taskBatches){
+          foreach($tb in @($p0.taskBatches)){
+            $taskPlan += [pscustomobject]@{
+              sheet=[string]$tb.sheet
+              batchMultiplier=$(if($tb.batchMultiplier){$tb.batchMultiplier}else{1})
+              part=[string]$p0.part
+              qty=[double]$(if($tb.vehicleQty){$tb.vehicleQty}else{$p0.qty})
+            }
+          }
+        }else{
+          $taskPlan += [pscustomobject]@{
+            sheet=[string]$p0.sheet
+            batchMultiplier=$(if($p0.batchMultiplier){$p0.batchMultiplier}else{1})
+            part=[string]$p0.part
+            qty=[double]$p0.qty
+          }
+        }
+      }
+
+      $reviewText=if($review.Count -gt 0){
+        "WS created with $($data.partCount) of $($parts.Count) CL part(s). $($review.Count) part(s) require attention and are listed in Part Review."
+      }else{
+        "WS created with all $($data.partCount) CL part(s)."
+      }
+
+      return [pscustomobject]@{
+        Status=200
+        Data=@{
+          outputDir=$staging
+          message=$reviewText
+          parts=$parts
+          reviewCount=$review.Count
+          reviewBreakdown=$reviewBreakdown
+          sigmaNestCreated=$true
+          wsPath=$data.wsPath
+          sigmaPartCount=$data.partCount
+          importedCount=$importable.Count
+          missingCount=$missing.Count
+          taskPlan=@($taskPlan)
+        }
+      }
     }finally{Remove-Item -LiteralPath $reqFile -Force -ErrorAction SilentlyContinue}
   }
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
