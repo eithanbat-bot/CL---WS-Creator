@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.8.1'
+$BRIDGE_VERSION = '2.8.2'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -747,7 +747,7 @@ function Handle-Request($req){
     ){
       Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot|Out-Null
     }
-    $root=$prsRoot
+    $jobRoot=$prsRoot
     $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
     $parts=@()
     foreach($p in @($b.parts)){
@@ -851,7 +851,7 @@ function Handle-Request($req){
       if(-not $reviewBreakdown.Contains($reason)){$reviewBreakdown[$reason]=0}
       $reviewBreakdown[$reason]=[int]$reviewBreakdown[$reason]+1
     }
-    $staging=Write-Job -root $root -name $name -parts $parts
+    $staging=Write-Job -root $jobRoot -name $name -parts $parts
 
     # Review no longer blocks WS creation. Any part with a resolved geometry
     # source is handed to SigmaNEST, even when it is marked REVIEW so the
@@ -880,7 +880,7 @@ function Handle-Request($req){
     $reqFile=Join-Path $ROOT ('_psrequest-'+[Diagnostics.Process]::GetCurrentProcess().Id+'-'+[DateTime]::Now.Ticks+'.json')
     $request=[pscustomobject]@{
       jobName=$name
-      libraryRoot=$root
+      libraryRoot=$jobRoot
       dxfRoot=$dxfRoot
       wsDirectory=[string]$b.wsDirectory
       parts=@($importable|ForEach-Object{
