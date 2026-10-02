@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile,[string]$ResultFile)
 $ErrorActionPreference='Stop'
-$CREATOR_VERSION='3.2.4'
+$CREATOR_VERSION='3.3.0'
 
 function Write-Diagnostic([string]$message,[string]$phase='STARTUP',[int]$exitCode=1){
   if(-not [string]::IsNullOrWhiteSpace($ResultFile)){
@@ -41,8 +41,15 @@ function Try-Set($obj,[string[]]$names,$value){
   if($null -eq $obj){return $null}
   foreach($name in $names){
     if([string]::IsNullOrWhiteSpace($name)){continue}
+    try{$obj.$name=$value;return $name}catch{}
     try{
-      $obj.$name=$value
+      $obj.GetType().InvokeMember(
+        $name,
+        [Reflection.BindingFlags]::SetProperty,
+        $null,
+        $obj,
+        @($value)
+      )|Out-Null
       return $name
     }catch{}
   }
@@ -70,11 +77,24 @@ function Get-NewPart($app,[int]$beforeCount,[string]$label){
   if($afterCount -le $beforeCount){
     throw ('SigmaNEST loaded "'+$label+'" but did not add it to the workspace PartsList.')
   }
+  # The X1.4 PartsList interface did not expose an Items() member in the
+  # verified COM metadata. Prefer COM enumeration, then try common indexers.
   try{
-    return $app.PartsList.Items($afterCount-1)
-  }catch{
-    throw ('SigmaNEST added "'+$label+'" but the new PartsList item could not be accessed: '+$_.Exception.Message)
+    $last=$null
+    foreach($item in $app.PartsList){$last=$item}
+    if($null -ne $last){return $last}
+  }catch{}
+  foreach($member in @('Item','Items','get_Item')){
+    try{
+      $obj=$app.PartsList.GetType().InvokeMember(
+        $member,
+        [Reflection.BindingFlags]::InvokeMethod -bor [Reflection.BindingFlags]::GetProperty,
+        $null,$app.PartsList,@([int]($afterCount-1))
+      )
+      if($null -ne $obj){return $obj}
+    }catch{}
   }
+  throw ('SigmaNEST added "'+$label+'" but the new PartsList item could not be accessed. PartsList.Count='+$afterCount)
 }
 
 function Add-GeometryToWorkspace($app,[string]$sourcePath,[string]$sourceType){
@@ -132,14 +152,26 @@ try{
   $phase='READ_REQUEST'
   $req=Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8|ConvertFrom-Json
   $phase='CREATE_COM'
+  $phase='CREATE_COM'
   $app=New-Object -ComObject SigmaNEST.SNApp
   $auto=New-Object -ComObject SigmaNEST.SNAutomation
-  $paths=New-Object -ComObject SigmaNEST.SNPaths
 
   $phase='RESOLVE_WS_PATH'
   $wsDir=[string]$req.wsDirectory
   if([string]::IsNullOrWhiteSpace($wsDir)){
-    try{$wsDir=[string]$paths.GetPath(0)}catch{$wsDir=''}
+    $wsRoot=[string]$req.wsRoot
+    if([string]::IsNullOrWhiteSpace($wsRoot)){
+      $libRoot=[string]$req.libraryRoot
+      if(-not [string]::IsNullOrWhiteSpace($libRoot)){
+        try{
+          $parent=[IO.Directory]::GetParent($libRoot)
+          if($parent){$wsRoot=$parent.FullName}
+        }catch{}
+      }
+    }
+    if(-not [string]::IsNullOrWhiteSpace($wsRoot)){
+      try{$wsDir=Join-Path -Path $wsRoot -ChildPath 'WS'}catch{}
+    }
   }
   if([string]::IsNullOrWhiteSpace($wsDir)){
     $libRoot=[string]$req.libraryRoot
