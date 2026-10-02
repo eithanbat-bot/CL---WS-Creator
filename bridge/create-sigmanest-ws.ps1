@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile)
 $ErrorActionPreference='Stop'
-$CREATOR_VERSION='3.1.0'
+$CREATOR_VERSION='3.2.0'
 
 function Out($o){$o|ConvertTo-Json -Depth 16 -Compress}
 
@@ -165,6 +165,7 @@ try{
       sourcePath=$sourcePath
       sourceType=$sourceType
       batchMultiplier=$x.batchMultiplier
+      taskBatches=@($x.taskBatches)
     }
   }
 
