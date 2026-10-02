@@ -13,7 +13,6 @@ try{[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls1
 
 $Repo='eithanbat-bot/CL---WS-Creator'
 $Branch='main'
-$ApiContents="https://api.github.com/repos/$Repo/contents/bridge?ref=$Branch"
 $RawBase="https://raw.githubusercontent.com/$Repo/$Branch/"
 $Port=17832
 
@@ -38,54 +37,9 @@ function Test-Xml([string]$Path){
   try{[xml](Get-Content -Raw -LiteralPath $Path)|Out-Null;return $true}catch{return $false}
 }
 
-function Get-GitBlobSha1([string]$Path){
-  $bytes=[IO.File]::ReadAllBytes($Path)
-  $header=[Text.Encoding]::ASCII.GetBytes(('blob '+$bytes.Length+[char]0))
-  $all=New-Object byte[] ($header.Length+$bytes.Length)
-  [Array]::Copy($header,0,$all,0,$header.Length)
-  [Array]::Copy($bytes,0,$all,$header.Length,$bytes.Length)
-  $sha1=[Security.Cryptography.SHA1]::Create()
-  try{return (($sha1.ComputeHash($all)|ForEach-Object{$_.ToString('x2')})-join '')}finally{$sha1.Dispose()}
-}
-
 function Get-Hash([string]$Path){
   if(Test-Path -LiteralPath $Path){return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash}
   return ''
-}
-
-function Invoke-Json([string]$Url){
-  Invoke-RestMethod -Uri $Url -UseBasicParsing -TimeoutSec 60 -Headers @{
-    'User-Agent'='CL-WS-Creator-Updater'
-    'Accept'='application/vnd.github+json'
-    'Cache-Control'='no-cache'
-  }
-}
-
-function Download-Verified([string]$Url,[string]$ApiUrl,[string]$Destination,[string]$ExpectedSha){
-  $parent=Split-Path -Parent $Destination
-  if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
-  $tmp=$Destination+'.download'
-  try{
-    # Download the exact Git blob bytes through the Contents API rather than
-    # relying on a proxy-sensitive raw download URL. This prevents newline/BOM
-    # rewriting from causing false SHA mismatches on corporate networks.
-    $blob=Invoke-Json $ApiUrl
-    if($null -eq $blob -or [string]$blob.encoding -ne 'base64' -or [string]::IsNullOrWhiteSpace([string]$blob.content)){
-      throw 'GitHub Contents API did not return base64 file content.'
-    }
-    $b64=([string]$blob.content) -replace '\s',''
-    $bytes=[Convert]::FromBase64String($b64)
-    if($bytes.Length -lt 2){throw 'Downloaded file is empty.'}
-    [IO.File]::WriteAllBytes($tmp,$bytes)
-    if(-not(Test-Path -LiteralPath $tmp)){throw 'Download did not produce a file.'}
-    if($ExpectedSha){
-      $actual=Get-GitBlobSha1 $tmp
-      if($actual.ToLowerInvariant() -ne $ExpectedSha.ToLowerInvariant()){
-        throw "Git blob SHA mismatch. Expected $ExpectedSha but decoded $actual."
-      }
-    }
-    Move-Item -LiteralPath $tmp -Destination $Destination -Force
-  }finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}
 }
 
 function Stop-CreatorProcesses([string]$ServerPath){
