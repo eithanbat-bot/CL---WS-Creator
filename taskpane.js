@@ -309,7 +309,7 @@ function monitorDxfIndex(root){
         $('libraryStatus').textContent=(st.mode||'DXF')+' indexing under '+root+' — '+(st.filesFound||0)+' DXF files found; '+(st.workersCompleted||0)+'/'+(st.workers||0)+' workers complete.'+(st.currentPath?' Current: '+st.currentPath:'');
         pill('DXF indexing','neutral');
       }else if(st.state==='COMPLETE'){
-        $('libraryStatus').textContent=(st.filesFound||0)+' .DXF files indexed under '+root+' using '+(st.workers||1)+' worker(s). Automatic overnight refresh: '+(st.nextRefreshLocal||'scheduled')+'. PRS library is indexed separately.';
+        $('libraryStatus').textContent=(st.filesFound||0)+' .DXF files indexed under '+root+' using '+(st.workers||1)+' worker(s). Next refresh uses '+(st.workers||12)+' worker(s). Automatic overnight refresh: '+(st.nextRefreshLocal||'scheduled')+'. PRS library is indexed separately.';
         pill('Libraries ready','ok');
         if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null;}
       }else if(st.state==='FAILED'){
