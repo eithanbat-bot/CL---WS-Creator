@@ -17,8 +17,11 @@ try{
   foreach($f in $files){Set-Content -LiteralPath $f -Value '0' -Encoding ASCII}
   Set-Content -LiteralPath (Join-Path $root 'B Folderignore.txt') -Value '0' -Encoding ASCII
 
-  & (Get-Command pwsh -ErrorAction Stop).Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Root $root -IndexFile $indexFile -StatusFile $statusFile
+  $requestFile=Join-Path $runtime 'dxf-index-request.json'
+  @{Root=$root;IndexFile=$indexFile;StatusFile=$statusFile}|ConvertTo-Json|Set-Content -LiteralPath $requestFile -Encoding UTF8
+  & (Get-Command pwsh -ErrorAction Stop).Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath -RequestFile $requestFile
   if($LASTEXITCODE -ne 0){throw "DXF indexer exited with code $LASTEXITCODE"}
+  if(Test-Path -LiteralPath $requestFile){throw 'DXF indexer did not consume its request file.'}
 
   $status=Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json
   if([string]$status.state -ne 'COMPLETE'){throw "Unexpected final status: $($status.state) / $($status.message)"}
