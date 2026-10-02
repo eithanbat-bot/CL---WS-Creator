@@ -455,32 +455,119 @@ function Ensure-Metadata($item) {
   return $item
 }
 
-function Select-MatchCandidate($candidates) {
-  $c=@($candidates)
-  if($c.Count -eq 1){return $c[0]}
-  if($c.Count -gt 1){
-    # Prefer one unique PRS when the same part is also present as a DXF.
-    $prs=@($c|Where-Object {$_.fileType -eq 'PRS'})
-    if($prs.Count -eq 1){return $prs[0]}
-    return [pscustomobject]@{ambiguous=$c}
+function Deduplicate-Candidates($candidates){
+  $seen=@{}
+  $out=@()
+  foreach($c in @($candidates)){
+    if(-not $c){continue}
+    $key=''
+    try{$key=[IO.Path]::GetFullPath([string]$c.file).ToUpperInvariant()}catch{$key=[string]$c.file}
+    if([string]::IsNullOrWhiteSpace($key)){continue}
+    if(-not $seen.ContainsKey($key)){
+      $seen[$key]=$true
+      $out+=$c
+    }
   }
-  $null
+  return @($out)
 }
 
-function Find-Part([string]$part){
+function Candidate-Score($candidate,[string]$clMat,[string]$clThk,[string]$matchType){
+  $score=switch($matchType){
+    'EXACT' {300}
+    'EMBEDDED' {200}
+    'VARIATION' {100}
+    default {0}
+  }
+
+  if([string]$candidate.fileType -eq 'PRS'){
+    Ensure-Metadata -item $candidate | Out-Null
+    $libMat=[string]$candidate.likelyMaterial
+    $libThk=[string]$candidate.thickness
+
+    $clMatKnown=-not [string]::IsNullOrWhiteSpace($clMat)
+    $clThkKnown=-not [string]::IsNullOrWhiteSpace($clThk)
+    $libMatKnown=-not [string]::IsNullOrWhiteSpace($libMat)
+    $libThkKnown=-not [string]::IsNullOrWhiteSpace($libThk)
+
+    if($clMatKnown -and $libMatKnown){
+      if(Material-Equal -a $clMat -b $libMat -aThickness $clThk -bThickness $libThk){$score+=80}
+      else{$score-=220}
+    }elseif($clMatKnown -and -not $libMatKnown){
+      $score+=5
+    }
+
+    if($clThkKnown -and $libThkKnown){
+      $ct=Thickness-Number -s $clThk
+      $lt=Thickness-Number -s $libThk
+      if(-not [double]::IsNaN($ct) -and -not [double]::IsNaN($lt)){
+        if($ct -eq $lt){$score+=60}else{$score-=160}
+      }
+    }elseif($clThkKnown -and -not $libThkKnown){
+      $score+=3
+    }
+  }else{
+    # DXFs are deliberately not guessed by material/thickness because their
+    # index currently contains path/name metadata only.
+    $score+=0
+  }
+
+  return [int]$score
+}
+
+function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[string]$matchType='EXACT') {
+  $c=@(Deduplicate-Candidates $candidates)
+  if($c.Count -eq 0){return $null}
+  if($c.Count -eq 1){return $c[0]}
+
+  $scored=@()
+  foreach($candidate in $c){
+    $scored += [pscustomobject]@{
+      candidate=$candidate
+      score=(Candidate-Score -candidate $candidate -clMat $clMat -clThk $clThk -matchType $matchType)
+    }
+  }
+  $ordered=@($scored|Sort-Object -Property score -Descending)
+
+  if($ordered.Count -eq 1){return $ordered[0].candidate}
+  $best=[int]$ordered[0].score
+  $second=[int]$ordered[1].score
+
+  # A clear metadata-based advantage is safe to use. A tie remains review.
+  if($best -gt $second -and ($best-$second) -ge 40){
+    return $ordered[0].candidate
+  }
+
+  # If exactly one PRS survives the scoring meaningfully above all DXFs, prefer it.
+  $topPrs=@($ordered|Where-Object {$_.candidate.fileType -eq 'PRS' -and $_.score -eq $best})
+  if($topPrs.Count -eq 1 -and $best -gt $second){
+    return $topPrs[0].candidate
+  }
+
+  return [pscustomobject]@{
+    ambiguous=@($ordered|ForEach-Object {$_.candidate})
+    candidateScores=@($ordered|ForEach-Object{
+      [pscustomobject]@{
+        file=[string]$_.candidate.file
+        fileType=[string]$_.candidate.fileType
+        likelyMaterial=[string]$_.candidate.likelyMaterial
+        thickness=[string]$_.candidate.thickness
+        score=[int]$_.score
+      }
+    })
+  }
+}
+
+function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
   $n=Normalize -s $part
   $dxf=@()
   if($script:DXF_ROOT){$dxf=@(Get-DxfShardCandidates -root $script:DXF_ROOT -part $part)}
 
-  # Match in stages while combining PRS and DXF candidates at each stage.
-  # A unique PRS candidate is preferred when it is present alongside a DXF
-  # candidate for the same exact match.
   $prsExact=@()
   if($script:BYNAME -and $script:BYNAME.ContainsKey($n)){$prsExact=@($script:BYNAME[$n])}
   $dxfExact=@($dxf|Where-Object {(Normalize -s $_.partName) -eq $n})
-  $exact=@($prsExact+$dxfExact)
+  $exact=@(Deduplicate-Candidates ($prsExact+$dxfExact))
   if($exact.Count){
-    $hit=Select-MatchCandidate $exact
+    $hit=Select-MatchCandidate -candidates $exact -clMat $clMat -clThk $clThk -matchType 'EXACT'
     if($hit -and -not($hit.PSObject.Properties.Name -contains 'ambiguous')){
       Ensure-Metadata -item $hit | Out-Null
       Set-Prop $hit 'matchType' 'EXACT' | Out-Null
@@ -491,9 +578,9 @@ function Find-Part([string]$part){
 
   $prsEmbedded=@($script:INDEX|Where-Object {Is-EmbeddedMatch -candidate $_.embeddedPartName -target $part})
   $dxfEmbedded=@($dxf|Where-Object {Is-EmbeddedMatch -candidate $_.embeddedPartName -target $part})
-  $embedded=@($prsEmbedded+$dxfEmbedded)
+  $embedded=@(Deduplicate-Candidates ($prsEmbedded+$dxfEmbedded))
   if($embedded.Count){
-    $hit=Select-MatchCandidate $embedded
+    $hit=Select-MatchCandidate -candidates $embedded -clMat $clMat -clThk $clThk -matchType 'EMBEDDED'
     if($hit -and -not($hit.PSObject.Properties.Name -contains 'ambiguous')){
       Ensure-Metadata -item $hit | Out-Null
       Set-Prop $hit 'matchType' 'EMBEDDED' | Out-Null
@@ -506,9 +593,9 @@ function Find-Part([string]$part){
   $prsVars=@()
   if($script:BYVAR -and $script:BYVAR.ContainsKey($vk)){$prsVars=@($script:BYVAR[$vk])}
   $dxfVars=@($dxf|Where-Object {(VariationKey -s $_.partName) -eq $vk})
-  $vars=@($prsVars+$dxfVars)
+  $vars=@(Deduplicate-Candidates ($prsVars+$dxfVars))
   if($vars.Count){
-    $hit=Select-MatchCandidate $vars
+    $hit=Select-MatchCandidate -candidates $vars -clMat $clMat -clThk $clThk -matchType 'VARIATION'
     if($hit -and -not($hit.PSObject.Properties.Name -contains 'ambiguous')){
       Ensure-Metadata -item $hit | Out-Null
       Set-Prop $hit 'matchType' 'VARIATION' | Out-Null
@@ -689,7 +776,7 @@ function Handle-Request($req){
     $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
     $parts=@()
     foreach($p in @($b.parts)){
-      $f=Find-Part -part ([string]$p.part)
+      $f=Find-Part -part ([string]$p.part) -clMat ([string]$p.material) -clThk ([string]$p.thickness)
       if(-not$f){
         $ds=Get-DxfStatus
         if([string]$ds.root -eq [string]$dxfRoot -and [string]$ds.state -eq 'RUNNING'){
@@ -707,7 +794,12 @@ function Handle-Request($req){
       if($f.PSObject.Properties.Name -contains 'ambiguous'){
         Set-Prop $p 'status' 'REVIEW' | Out-Null
         Set-Prop $p 'statusLabel' ('AMBIGUOUS ('+$f.ambiguous.Count+')') | Out-Null
-        Set-Prop $p 'reviewReason' 'More than one geometry source matches this part' | Out-Null
+        $detail='More than one geometry source matches this part'
+        if($f.candidateScores){
+          $top=@($f.candidateScores|Select-Object -First 3)
+          $detail+=' after material/thickness scoring: '+(($top|ForEach-Object{([IO.Path]::GetFileName([string]$_.file))+', score '+$_.score}) -join ' | ')
+        }
+        Set-Prop $p 'reviewReason' $detail | Out-Null
         $parts+=$p
         continue
       }
