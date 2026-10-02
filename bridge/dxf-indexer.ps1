@@ -109,7 +109,6 @@ try{
   $errors=0
   $directories=0
   $lastStatus=Get-Date
-  $writers=New-Object 'System.Collections.Generic.Dictionary[string,object]'
   $pending=New-Object 'System.Collections.Generic.Stack[string]'
   $pending.Push($Root)
 
@@ -142,31 +141,38 @@ try{
     Write-Log "Enumerating DXF files: $dir"
 
     try{
-      foreach($file in [IO.Directory]::EnumerateFiles($dir,'*.dxf',[IO.SearchOption]::TopDirectoryOnly)){
-        $count++
-        $partName=[IO.Path]::GetFileNameWithoutExtension($file)
-        $key=Shard-Key $partName
-        $writer=$null
+      $writers=New-Object 'System.Collections.Generic.Dictionary[string,object]'
+      try{
+        foreach($file in [IO.Directory]::EnumerateFiles($dir,'*.dxf',[IO.SearchOption]::TopDirectoryOnly)){
+          $count++
+          $partName=[IO.Path]::GetFileNameWithoutExtension($file)
+          $key=Shard-Key $partName
+          $writer=$null
 
-        if($writers.ContainsKey($key)){
-          $writer=$writers[$key]
-        }else{
-          $shardFile=Join-Path $shardTmp ($key+'.tsv')
-          $writer=New-Object IO.StreamWriter($shardFile,$false,[Text.Encoding]::UTF8)
-          $writer.WriteLine(('PartName'+[char]9+'File'))
-          $writers.Add($key,$writer)
+          if($writers.ContainsKey($key)){
+            $writer=$writers[$key]
+          }else{
+            $shardFile=Join-Path $shardTmp ($key+'.tsv')
+            $existed=Test-Path -LiteralPath $shardFile
+            $writer=New-Object IO.StreamWriter($shardFile,$true,[Text.Encoding]::UTF8)
+            if(-not $existed){$writer.WriteLine(('PartName'+[char]9+'File'))}
+            $writers.Add($key,$writer)
+          }
+
+          $safePart=([string]$partName).Replace([char]9,' ')
+          $safeFile=([string]$file).Replace([char]9,' ')
+          $writer.WriteLine($safePart+[char]9+$safeFile)
+
+          $now=Get-Date
+          if(($now-$lastStatus).TotalSeconds -ge 2 -or ($count % 250) -eq 0){
+            foreach($w in $writers.Values){try{$w.Flush()}catch{}}
+            Write-Status 'RUNNING' ("Indexed "+$count+" DXF files across "+$directories+" folders.") $count $errors $started $null $dir $directories
+            $lastStatus=$now
+          }
         }
-
-        $safePart=([string]$partName).Replace([char]9,' ')
-        $safeFile=([string]$file).Replace([char]9,' ')
-        $writer.WriteLine($safePart+[char]9+$safeFile)
-
-        $now=Get-Date
-        if(($now-$lastStatus).TotalSeconds -ge 2 -or ($count % 250) -eq 0){
-          foreach($w in $writers.Values){try{$w.Flush()}catch{}}
-          Write-Status 'RUNNING' ("Indexed "+$count+" DXF files across "+$directories+" folders.") $count $errors $started $null $dir $directories
-          $lastStatus=$now
-        }
+      }finally{
+        foreach($w in $writers.Values){try{$w.Flush();$w.Dispose()}catch{}}
+        $writers.Clear()
       }
     }catch{
       $errors++
