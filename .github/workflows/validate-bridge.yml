@@ -137,8 +137,8 @@ jobs:
           if(-not $updater.Contains('function Test-Syntax')){throw 'Updater is missing PowerShell syntax validation.'}
           if(-not $updater.Contains('$newFiles')){throw 'Updater rollback does not track newly created runtime files.'}
           if(-not $updater.Contains('dxf-index\.json') -or -not $updater.Contains('dxf-index-status\.json')){throw 'Updater does not preserve generated DXF index state.'}
-          if(-not $updater.Contains('$ApiContents="https://api.github.com/repos/$Repo/contents/bridge?ref=$Branch"')){throw 'Updater does not use the GitHub Contents API for bridge discovery.'}
-          if(-not $updater.Contains("$_.path -like 'bridge/*'")){throw 'Updater does not filter GitHub bridge contents correctly.'}
+          if(-not $updater.Contains('https://github.com/$Repo/archive/refs/heads/$Branch.zip')){throw 'Updater does not use the single GitHub repository archive.'}
+          if($updater.Contains('$ApiContents=')){throw 'Updater still contains the old per-file GitHub Contents API dependency.'}
 
           if(-not $bat.Contains('api.github.com/repos/eithanbat-bot/CL---WS-Creator/contents/bridge/update-and-start.ps1?ref=main')){throw 'Bootstrap launcher does not point to the GitHub Contents API self-updater.'}
           if(-not $bat.Contains('Git blob integrity validation')){throw 'Bootstrap launcher does not verify updater integrity.'}
