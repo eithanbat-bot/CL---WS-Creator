@@ -1,6 +1,7 @@
 /* global Office, XLSX, CLParser */
 var BRIDGE='http://127.0.0.1:17832';
 var clFile=null, clWorkbook=null, sheets=[];
+var dxfMonitorTimer=null;
 
 function $(id){return document.getElementById(id)}
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
@@ -298,8 +299,6 @@ async function preview(){
   }
 }
 
-var dxfMonitorTimer=null;
-
 function monitorDxfIndex(root){
   if(dxfMonitorTimer)window.clearInterval(dxfMonitorTimer);
   async function check(){
@@ -307,10 +306,10 @@ function monitorDxfIndex(root){
       var st=await bridge('/api/dxf-status');
       if(String(st.root||'')!==String(root))return;
       if(st.state==='RUNNING'){
-        $('libraryStatus').textContent='DXF indexing in progress under '+root+' — '+(st.filesFound||0)+' DXF files indexed so far.'+(st.currentPath?' Current: '+st.currentPath:'');
+        $('libraryStatus').textContent=(st.mode||'DXF')+' indexing under '+root+' — '+(st.filesFound||0)+' DXF files found; '+(st.workersCompleted||0)+'/'+(st.workers||0)+' workers complete.'+(st.currentPath?' Current: '+st.currentPath:'');
         pill('DXF indexing','neutral');
       }else if(st.state==='COMPLETE'){
-        $('libraryStatus').textContent=(st.filesFound||0)+' .DXF files indexed recursively under '+root+'. PRS library is indexed separately.';
+        $('libraryStatus').textContent=(st.filesFound||0)+' .DXF files indexed under '+root+' using '+(st.workers||1)+' worker(s). Automatic overnight refresh: '+(st.nextRefreshLocal||'scheduled')+'. PRS library is indexed separately.';
         pill('Libraries ready','ok');
         if(dxfMonitorTimer){window.clearInterval(dxfMonitorTimer);dxfMonitorTimer=null;}
       }else if(st.state==='FAILED'){
@@ -364,6 +363,25 @@ async function scan(){
   }catch(e){
     $('libraryStatus').textContent=e.message;
     pill(e.message.indexOf('did not finish')>=0?'Bridge timeout':'Bridge error','bad');
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+async function refreshDxf(){
+  var btn=$('refreshDxf');
+  btn.disabled=true;
+  $('libraryStatus').textContent='Starting an immediate parallel DXF refresh under '+($('dxfPath').value.trim()||'Y:\\')+'...';
+  pill('DXF refresh','neutral');
+  try{
+    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
+    var r=await bridge('/api/dxf-refresh',{method:'POST',body:JSON.stringify({dxfRoot:dxfRoot})});
+    var st=r.dxfStatus||{};
+    $('libraryStatus').textContent=(st.mode||'REFRESH')+' started under '+dxfRoot+' — '+(st.workers||0)+' worker(s). The existing index remains available until the refreshed index is complete.';
+    monitorDxfIndex(dxfRoot);
+  }catch(e){
+    $('libraryStatus').textContent=e.message;
+    pill('DXF refresh failed','bad');
   }finally{
     btn.disabled=false;
   }
@@ -450,6 +468,7 @@ function init(){
   $('refreshSheets').addEventListener('click',loadSheets);
   $('sheetList').addEventListener('change',updateCount);
   $('scanLibrary').addEventListener('click',scan);
+  $('refreshDxf').addEventListener('click',refreshDxf);
   $('preview').addEventListener('click',preview);
   $('build').addEventListener('click',build);
   $('statusPill').addEventListener('click',checkBridge);
