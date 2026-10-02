@@ -4,6 +4,7 @@ if(-not(Test-Path -LiteralPath $scriptPath)){throw 'DXF indexer script not found
 
 $root=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-dxf-test '+[Guid]::NewGuid().ToString('N'))
 $runtime=Join-Path $root 'runtime'
+New-Item -ItemType Directory -Path $runtime -Force|Out-Null
 $indexFile=Join-Path $runtime 'dxf-index.json'
 $statusFile=Join-Path $runtime 'dxf-index-status.json'
 try{
