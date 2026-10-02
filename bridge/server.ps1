@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.8.4'
+$BRIDGE_VERSION = '2.8.5'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -903,8 +903,19 @@ function Handle-Request($req){
     try{
       $worker=Join-Path $BridgeDir 'create-sigmanest-ws.ps1'
       $raw=& (Get-PowerShellExe) -NoProfile -ExecutionPolicy Bypass -File $worker -RequestFile $reqFile 2>&1 | Out-String
-      $data=$raw.Trim()|ConvertFrom-Json
-      if(-not$data.ok){throw $data.error}
+      $rawText=[string]$raw
+      if([string]::IsNullOrWhiteSpace($rawText)){
+        throw 'SigmaNEST creator returned no output. Check SigmaNEST is running and that the creator script can start PowerShell COM automation.'
+      }
+      try{$data=$rawText.Trim()|ConvertFrom-Json}catch{
+        throw ('SigmaNEST creator returned invalid JSON: '+$rawText.Trim())
+      }
+      if($null -eq $data){throw 'SigmaNEST creator returned no result.'}
+      if(-not [bool]$data.ok){
+        $creatorError=[string]$data.error
+        if([string]::IsNullOrWhiteSpace($creatorError)){$creatorError='SigmaNEST creator failed without an error message. Raw output: '+$rawText.Trim()}
+        throw $creatorError
+      }
 
       $taskPlan=@()
       foreach($p0 in @($parts)){
