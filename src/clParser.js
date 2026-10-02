@@ -58,8 +58,10 @@
       if(!Number.isFinite(qty))continue;
       const batchMultiplier=sheetBatchMultiplier(mapping.sheet||'');
       const baseQty=qty;
+      // qty is always the quantity required for ONE vehicle. The sheet's
+      // (xN) multiplier belongs to the task/batch, not the WS part quantity.
       const effectiveQty=baseQty*batchMultiplier;
-      rows.push({sheet:mapping.sheet||'',sourceRow:i+1,part,qty:effectiveQty,baseQty,batchMultiplier,material,thickness,rawMaterial:clean(r[matIdx]),status:effectiveQty>0?'READY':(effectiveQty===0?'ZERO_QTY':'NEGATIVE_QTY')});
+      rows.push({sheet:mapping.sheet||'',sourceRow:i+1,part,qty:baseQty,baseQty,batchMultiplier,effectiveQty,material,thickness,rawMaterial:clean(r[matIdx]),status:baseQty>0?'READY':(baseQty===0?'ZERO_QTY':'NEGATIVE_QTY')});
     }
     return rows;
   }
