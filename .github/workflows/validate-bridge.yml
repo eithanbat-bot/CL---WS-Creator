@@ -63,8 +63,8 @@ jobs:
             ['TEST-001',3,'S355','6mm']
           ],{sheet:'BAT TEST (x2)'})[0];
           if(!p) throw new Error('Parser returned no row');
-          if(p.baseQty!==3 || p.batchMultiplier!==2 || p.qty!==6) {
-            throw new Error('Batch multiplier logic failed: '+JSON.stringify(p));
+          if(p.baseQty!==3 || p.batchMultiplier!==2 || p.qty!==3 || p.effectiveQty!==6) {
+            throw new Error('Per-vehicle quantity / task batch logic failed: '+JSON.stringify(p));
           }
           console.log('CL parser behaviour: OK');
           NODE
