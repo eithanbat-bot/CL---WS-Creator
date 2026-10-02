@@ -938,6 +938,9 @@ function Handle-Request($req){
       if([string]::IsNullOrWhiteSpace($rawText)){
         $detail='SigmaNEST creator returned no result. Exit code: '+$exitCode+'.'
         if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' STDERR: '+$errText}
+        $diag=''
+        if(Test-Path -LiteralPath $creatorResult){try{$diag=[string](Get-Content -LiteralPath $creatorResult -Raw -Encoding UTF8).Trim()}catch{}}
+        if(-not [string]::IsNullOrWhiteSpace($diag)){$detail+=' Diagnostic result: '+$diag}
         $detail+=' Creator output files: '+$creatorOut+' ; '+$creatorErr+' ; '+$creatorResult
         throw $detail
       }
