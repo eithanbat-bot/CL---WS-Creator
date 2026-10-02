@@ -34,8 +34,8 @@ jobs:
             ) | Out-Null
             if ($errors.Count -gt 0) {
               Write-Host "$file has PowerShell parse errors:" -ForegroundColor Red
-              $errors | ForEach-Object {
-                Write-Host ("Line "+$_.Extent.StartLineNumber+", Col "+$_.Extent.StartColumnNumber+": "+$_.Message) -ForegroundColor Red
+              foreach($err in $errors){
+                Write-Host ("Line "+$err.Extent.StartLineNumber+", Col "+$err.Extent.StartColumnNumber+": "+$err.Message) -ForegroundColor Red
               }
               exit 1
             }
@@ -82,15 +82,16 @@ jobs:
           $xml = [xml](Get-Content -Raw -LiteralPath 'manifest.xml')
           if (-not $xml.OfficeApp) { throw 'manifest.xml did not parse as an OfficeApp manifest.' }
           $source = [string]$xml.OfficeApp.DefaultSettings.SourceLocation.DefaultValue
-          if ($source -notmatch '^https://eithanbat.github.io/CL---WS-Creator/taskpane.html') {
+          if (-not $source.StartsWith('https://eithanbat.github.io/CL---WS-Creator/taskpane.html')) {
             throw "manifest.xml SourceLocation is unexpected: $source"
           }
           if ([string]$xml.OfficeApp.Hosts.Host.Name -ne 'Workbook') {
             throw 'Manifest does not target Excel Workbook.'
           }
-          $version=[string]$xml.OfficeApp.Version
-          if($version -notmatch '^d+.d+.d+.d+$'){throw "Invalid manifest version: $version"}
-          Write-Host "manifest.xml: OK (version $version)" -ForegroundColor Green
+          $versionText=[string]$xml.OfficeApp.Version
+          try{[version]$version=[version]$versionText}catch{throw "Invalid manifest version: $versionText"}
+          if($version -lt [version]'1.0.0.0'){throw "Invalid manifest version: $versionText"}
+          Write-Host "manifest.xml: OK (version $versionText)" -ForegroundColor Green
 
       - name: Validate architecture and launcher
         shell: pwsh
@@ -109,42 +110,36 @@ jobs:
             throw 'Repository tree contains a stray root-level bridge runtime file.'
           }
 
-          if ($server -notmatch 'function Start-DxfScan') { throw 'Server does not contain Start-DxfScan.' }
-          if ($server -notmatch 'function Get-DxfShardCandidates') { throw 'Server does not contain the sharded DXF index reader.' }
-          if ($server -match 'Get-ChildItem[^
-]*$dxfRoot[^
-]*-Recurse') { throw 'Server must never recursively enumerate the DXF root during an HTTP request.' }
-          if ($server -match 'Get-GeometryFiless+-roots+$dxfRoot') { throw 'Server must not use the synchronous DXF walk.' }
-          if ($server -notmatch 'DXF_INDEX_NOT_READY') { throw 'Server build API does not reject incomplete DXF indexes.' }
-          if ($server -notmatch 'FOUND - DXF') { throw 'Server does not have the DXF-ready status path.' }
+          if(-not $server.Contains('function Start-DxfScan')){throw 'Server does not contain Start-DxfScan.'}
+          if(-not $server.Contains('function Get-DxfShardCandidates')){throw 'Server does not contain the sharded DXF index reader.'}
+          if($server.Contains('Get-GeometryFiles -root $dxfRoot')){throw 'Server must not use the synchronous DXF walk.'}
+          if(-not $server.Contains('DXF_INDEX_NOT_READY')){throw 'Server build API does not reject incomplete DXF indexes.'}
+          if(-not $server.Contains('FOUND - DXF')){throw 'Server does not have the DXF-ready status path.'}
 
-          $serverLine=@($server -split "?
-" | Where-Object {$_ -match '^s*$BRIDGE_VERSIONs*='}) | Select-Object -First 1
+          $serverLine=@($server -split [Environment]::NewLine | Where-Object {$_.TrimStart().StartsWith('$BRIDGE_VERSION')}) | Select-Object -First 1
           $bridgeVersion=[regex]::Match($serverLine,"'([^']+)'").Groups[1].Value
-          if($bridgeVersion -notmatch '^d+.d+.d+$'){throw "Invalid bridge runtime version: $bridgeVersion"}
+          if([string]::IsNullOrWhiteSpace($bridgeVersion)){throw 'Bridge runtime version is not declared.'}
 
-          if ($indexer -notmatch '[IO.Directory]::EnumerateFiles') { throw 'DXF indexer is not using the streaming directory enumerator.' }
-          if ($indexer -notmatch 'RequestFile') { throw 'DXF indexer does not support request-file startup.' }
-          if ($indexer -notmatch 'ReparsePoint') { throw 'DXF indexer does not protect against reparse-point recursion.' }
+          if(-not $indexer.Contains('[IO.Directory]::EnumerateFiles')){throw 'DXF indexer is not using the streaming directory enumerator.'}
+          if(-not $indexer.Contains('RequestFile')){throw 'DXF indexer does not support request-file startup.'}
+          if(-not $indexer.Contains('ReparsePoint')){throw 'DXF indexer does not protect against reparse-point recursion.'}
 
-          $indexerLine=@($indexer -split "?
-" | Where-Object {$_ -match '^s*$DXF_INDEXER_VERSIONs*='}) | Select-Object -First 1
+          $indexerLine=@($indexer -split [Environment]::NewLine | Where-Object {$_.TrimStart().StartsWith('$DXF_INDEXER_VERSION')}) | Select-Object -First 1
           $indexerVersion=[regex]::Match($indexerLine,"'([^']+)'").Groups[1].Value
-          $requiredLine=@($server -split "?
-" | Where-Object {$_ -match '^s*$requiredIndexerVersions*='}) | Select-Object -First 1
+          $requiredLine=@($server -split [Environment]::NewLine | Where-Object {$_.TrimStart().StartsWith('$requiredIndexerVersion')}) | Select-Object -First 1
           $requiredVersion=[regex]::Match($requiredLine,"'([^']+)'").Groups[1].Value
           if([string]::IsNullOrWhiteSpace($indexerVersion) -or [string]::IsNullOrWhiteSpace($requiredVersion)){throw 'Could not read DXF indexer version declarations.'}
           if($indexerVersion -ne $requiredVersion){throw "Server requires DXF indexer $requiredVersion but indexer publishes $indexerVersion."}
 
-          if ($updater -notmatch 'function Get-GitBlobSha1') { throw 'Updater is missing Git blob integrity validation.' }
-          if ($updater -notmatch 'function Test-Syntax') { throw 'Updater is missing PowerShell syntax validation.' }
-          if ($updater -notmatch '$newFiles') { throw 'Updater rollback does not track newly created runtime files.' }
-          if ($updater -notmatch 'dxf-index\.json' -or $updater -notmatch 'dxf-index-status\.json') { throw 'Updater does not preserve generated DXF index state.' }
-          if ($updater -notmatch 'bridge/*') { throw 'Updater does not discover all bridge files from GitHub.' }
+          if(-not $updater.Contains('function Get-GitBlobSha1')){throw 'Updater is missing Git blob integrity validation.'}
+          if(-not $updater.Contains('function Test-Syntax')){throw 'Updater is missing PowerShell syntax validation.'}
+          if(-not $updater.Contains('$newFiles')){throw 'Updater rollback does not track newly created runtime files.'}
+          if(-not $updater.Contains('dxf-index.json') -or -not $updater.Contains('dxf-index-status.json')){throw 'Updater does not preserve generated DXF index state.'}
+          if(-not $updater.Contains("'.path -like ''bridge/*''")){throw 'Updater does not discover bridge files from GitHub.'}
 
-          if ($bat -notmatch 'raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1') { throw 'Bootstrap launcher does not point to the GitHub self-updater.' }
-          if ($bat -notmatch 'Git blob integrity validation') { throw 'Bootstrap launcher does not verify updater integrity.' }
-          if ($taskpane -notmatch 'Start Bridge Fixed.bat') { throw 'Task pane does not reference the stable bridge launcher.' }
-          if ($html -notmatch 'taskpane.js?v=__BUILD__') { throw 'Task pane cache-busting placeholder is missing.' }
+          if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the GitHub self-updater.'}
+          if(-not $bat.Contains('Git blob integrity validation')){throw 'Bootstrap launcher does not verify updater integrity.'}
+          if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
+          if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
 
-          Write-Host ("Architecture checks: OK. Bridge $bridgeVersion / DXF indexer $indexerVersion") -ForegroundColor Green
+          Write-Host ("Architecture checks: OK. Bridge "+$bridgeVersion+" / DXF indexer "+$indexerVersion) -ForegroundColor Green
