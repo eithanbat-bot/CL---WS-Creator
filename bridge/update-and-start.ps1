@@ -127,45 +127,51 @@ try{
   Say 'Checking GitHub for the newest bridge runtime...'
   $latestCommit=Get-LatestCommitSha
   Say "GitHub main commit: $($latestCommit.Substring(0,8))" 'Cyan'
-  $ApiContents="https://api.github.com/repos/$Repo/contents/bridge?ref=$latestCommit"
-  # Use the repository Contents API rather than the Git Trees API. Some
-  # corporate/network proxies return 404 for /git/trees even when normal
-  # repository APIs work. The bridge folder is flat, so the Contents API
-  # gives us every runtime file and its Git blob SHA directly.
-  $contents=Invoke-Json $ApiContents
-  if($null -eq $contents){throw 'GitHub returned no bridge contents.'}
 
-  $entries=@(
-    @($contents)|
-      Where-Object{
-        $_.type -eq 'file' -and
-        $_.path -like 'bridge/*' -and
-        $_.path -notmatch '^bridge/(config\\.json|dxf-index\\.json|dxf-index-status\\.json)$' -and
-        $_.path -notmatch '^bridge/dxf-index/' -and
-        $_.path -notmatch '^bridge/backup/'
-      }|
-      ForEach-Object{
-        [pscustomobject]@{
-          relative=[string]$_.name
-          sha=[string]$_.sha
-          downloadUrl=[string]$_.download_url
-        }
-      }
-  )
-  if($entries.Count -eq 0){throw 'GitHub returned no bridge runtime files.'}
+  # Download one repository archive instead of making a separate API request
+  # for every bridge file. This avoids GitHub API rate limits/403 responses.
+  $zip=Join-Path $tmpRoot 'repository.zip'
+  $extract=Join-Path $tmpRoot 'repository'
+  $archiveUrl="https://github.com/$Repo/archive/refs/heads/$Branch.zip"
+  Say 'Downloading the current repository archive...'
+  Invoke-WebRequest -Uri $archiveUrl -OutFile $zip -UseBasicParsing -TimeoutSec 180 -Headers @{
+    'User-Agent'='CL-WS-Creator-Updater'
+    'Cache-Control'='no-cache'
+  }
+  if(-not(Test-Path -LiteralPath $zip)){throw 'GitHub repository archive download did not produce a file.'}
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+  $archiveRoot=@(Get-ChildItem -LiteralPath $extract -Directory -ErrorAction Stop|Select-Object -First 1)
+  if($archiveRoot.Count -ne 1){throw 'Could not determine the extracted GitHub repository folder.'}
+
+  $remoteBridge=Join-Path $archiveRoot[0].FullName 'bridge'
+  if(-not(Test-Path -LiteralPath $remoteBridge)){throw 'GitHub archive does not contain the bridge folder.'}
+
+  $runtimeFiles=@(Get-ChildItem -LiteralPath $remoteBridge -File -ErrorAction Stop |
+    Where-Object{
+      $_.Name -notin @('config.json','dxf-index.json','dxf-index-status.json') -and
+      $_.Name -notlike '*.log'
+    })
+  if($runtimeFiles.Count -eq 0){throw 'GitHub archive contains no bridge runtime files.'}
+
+  $entries=@($runtimeFiles|ForEach-Object{
+    [pscustomobject]@{
+      relative=$_.Name
+      stage=$_.FullName
+    }
+  })
 
   foreach($entry in $entries){
-    $stage=Join-Path $tmpRoot $entry.relative
-    $url=[string]$entry.downloadUrl
-    if([string]::IsNullOrWhiteSpace($url)){$url=$RawBase+'bridge/'+$entry.relative.Replace('\\','/')}
-    $apiUrl="https://api.github.com/repos/$Repo/contents/bridge/"+[uri]::EscapeDataString($entry.relative)+"?ref=$latestCommit"
-    Say "Verifying bridge\\$($entry.relative)..."
-    Download-Verified $url $apiUrl $stage $entry.sha
+    $stage=Join-Path $tmpRoot ('stage-'+$entry.relative)
+    Copy-Item -LiteralPath $entry.stage -Destination $stage -Force
     $ext=[IO.Path]::GetExtension($entry.relative).ToLowerInvariant()
+    Say "Verifying bridge\\$($entry.relative)..."
     if($ext -eq '.ps1' -and -not(Test-Syntax $stage)){throw "Downloaded $($entry.relative) failed PowerShell syntax validation."}
+    $entry.stage=$stage
   }
 
-  $remoteServer=Join-Path $tmpRoot 'server.ps1'
+  $remoteServer=Join-Path $tmpRoot 'stage-server.ps1'
+  if(-not(Test-Path -LiteralPath $remoteServer)){throw 'GitHub bridge does not contain server.ps1.'}
   if(-not(Test-Path -LiteralPath $remoteServer)){throw 'GitHub bridge does not contain server.ps1.'}
   $remoteVersion=Get-Version $remoteServer
   if($remoteVersion -eq 'unknown' -or $remoteVersion -eq 'none'){throw 'GitHub server.ps1 does not publish a bridge version.'}
@@ -174,7 +180,7 @@ try{
   $install=@()
   foreach($entry in $entries){
     $local=Join-Path $BridgeDir $entry.relative
-    $stage=Join-Path $tmpRoot $entry.relative
+    $stage=[string]$entry.stage
     if((Get-Hash $stage) -ne (Get-Hash $local)){
       $install+=[pscustomobject]@{Stage=$stage;Local=$local;Relative=$entry.relative}
     }
