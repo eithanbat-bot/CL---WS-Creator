@@ -79,7 +79,7 @@
         x.qty+=r.qty;
         x.sourceSheets.push(r.sheet);
         x.sourceRows.push(r.sourceRow);
-        x.taskBatches.push({sheet:r.sheet,batchMultiplier:r.batchMultiplier,vehicleQty:r.baseQty});
+        x.taskBatches.push({sheet:r.sheet,batchMultiplier:r.batchMultiplier,vehicleQty:r.baseQty,part:r.part});
       }
     }
 
