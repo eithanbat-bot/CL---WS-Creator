@@ -152,7 +152,6 @@ try{
   $phase='READ_REQUEST'
   $req=Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8|ConvertFrom-Json
   $phase='CREATE_COM'
-  $phase='CREATE_COM'
   $app=New-Object -ComObject SigmaNEST.SNApp
   $auto=New-Object -ComObject SigmaNEST.SNAutomation
 
@@ -171,15 +170,6 @@ try{
     }
     if(-not [string]::IsNullOrWhiteSpace($wsRoot)){
       try{$wsDir=Join-Path -Path $wsRoot -ChildPath 'WS'}catch{}
-    }
-  }
-  if([string]::IsNullOrWhiteSpace($wsDir)){
-    $libRoot=[string]$req.libraryRoot
-    if(-not [string]::IsNullOrWhiteSpace($libRoot)){
-      try{
-        $parent=[IO.Directory]::GetParent($libRoot)
-        if($parent){$wsDir=Join-Path -Path $parent.FullName -ChildPath 'WS'}
-      }catch{}
     }
   }
   if([string]::IsNullOrWhiteSpace($wsDir)){
