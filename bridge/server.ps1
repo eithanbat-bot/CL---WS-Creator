@@ -861,7 +861,7 @@ function Handle-Request($req){
       $raw=& (Get-PowerShellExe) -NoProfile -ExecutionPolicy Bypass -File $worker -RequestFile $reqFile 2>&1 | Out-String
       $data=$raw.Trim()|ConvertFrom-Json
       if(-not$data.ok){throw $data.error}
-      return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message=$data.message;parts=$parts;reviewCount=0;sigmaNestCreated=$true;wsPath=$data.wsPath;sigmaPartCount=$data.partCount;taskPlan=@($parts|ForEach-Object{[pscustomobject]@{sheet=$_.sheet;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});part=$_.part;qty=$_.qty}})}}
+      return [pscustomobject]@{Status=200;Data=@{outputDir=$staging;message=$data.message;parts=$parts;reviewCount=0;sigmaNestCreated=$true;wsPath=$data.wsPath;sigmaPartCount=$data.partCount;taskPlan=@($parts|ForEach-Object{if($_.taskBatches){@($_.taskBatches|ForEach-Object{[pscustomobject]@{sheet=$_.sheet;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});part=$_.part;qty=$_.vehicleQty}})}else{[pscustomobject]@{sheet=$_.sheet;batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1});part=$_.part;qty=$_.qty}}})}}
     }finally{Remove-Item -LiteralPath $reqFile -Force -ErrorAction SilentlyContinue}
   }
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
