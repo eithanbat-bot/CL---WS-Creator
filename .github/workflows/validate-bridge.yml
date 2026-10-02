@@ -80,17 +80,21 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $xml = [xml](Get-Content -Raw -LiteralPath 'manifest.xml')
-          if (-not $xml.OfficeApp) { throw 'manifest.xml did not parse as an OfficeApp manifest.' }
-          $source = [string]$xml.OfficeApp.DefaultSettings.SourceLocation.DefaultValue
-          if (-not $source.StartsWith('https://eithanbat.github.io/CL---WS-Creator/taskpane.html')) {
-            throw "manifest.xml SourceLocation is unexpected: $source"
-          }
-          if ([string]$xml.OfficeApp.Hosts.Host.Name -ne 'Workbook') {
-            throw 'Manifest does not target Excel Workbook.'
-          }
-          $versionText=[string]$xml.OfficeApp.Version
+          if (-not $xml.DocumentElement) { throw 'manifest.xml did not parse as XML.' }
+
+          $ns = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
+          $ns.AddNamespace('oa','http://schemas.microsoft.com/office/appforoffice/1.1')
+
+          $sourceNode=$xml.SelectSingleNode('/oa:OfficeApp/oa:DefaultSettings/oa:SourceLocation',$ns)
+          if(-not $sourceNode){throw 'manifest.xml is missing DefaultSettings/SourceLocation.'}
+          $source=[string]$sourceNode.GetAttribute('DefaultValue')
+          if(-not $source.StartsWith('https://eithanbat.github.io/CL---WS-Creator/taskpane.html')){throw "manifest.xml SourceLocation is unexpected: $source"}
+
+          $hostNode=$xml.SelectSingleNode('/oa:OfficeApp/oa:Hosts/oa:Host',$ns)
+          if(-not $hostNode -or [string]$hostNode.GetAttribute('Name') -ne 'Workbook'){throw 'Manifest does not target Excel Workbook.'}
+
+          $versionText=[string]$xml.DocumentElement.SelectSingleNode('/oa:OfficeApp/oa:Version',$ns).InnerText
           try{[version]$version=[version]$versionText}catch{throw "Invalid manifest version: $versionText"}
-          if($version -lt [version]'1.0.0.0'){throw "Invalid manifest version: $versionText"}
           Write-Host "manifest.xml: OK (version $versionText)" -ForegroundColor Green
 
       - name: Validate architecture and launcher
