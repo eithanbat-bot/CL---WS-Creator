@@ -125,6 +125,9 @@ $tmpRoot=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-update-'+[Guid]::NewGuid()
 try{
   New-Item -ItemType Directory -Path $tmpRoot -Force|Out-Null
   Say 'Checking GitHub for the newest bridge runtime...'
+  $latestCommit=Get-LatestCommitSha
+  Say "GitHub main commit: $($latestCommit.Substring(0,8))" 'Cyan'
+  $ApiContents="https://api.github.com/repos/$Repo/contents/bridge?ref=$latestCommit"
   # Use the repository Contents API rather than the Git Trees API. Some
   # corporate/network proxies return 404 for /git/trees even when normal
   # repository APIs work. The bridge folder is flat, so the Contents API
@@ -155,7 +158,7 @@ try{
     $stage=Join-Path $tmpRoot $entry.relative
     $url=[string]$entry.downloadUrl
     if([string]::IsNullOrWhiteSpace($url)){$url=$RawBase+'bridge/'+$entry.relative.Replace('\\','/')}
-    $apiUrl="https://api.github.com/repos/$Repo/contents/bridge/"+[uri]::EscapeDataString($entry.relative)+"?ref=$Branch"
+    $apiUrl="https://api.github.com/repos/$Repo/contents/bridge/"+[uri]::EscapeDataString($entry.relative)+"?ref=$latestCommit"
     Say "Verifying bridge\\$($entry.relative)..."
     Download-Verified $url $apiUrl $stage $entry.sha
     $ext=[IO.Path]::GetExtension($entry.relative).ToLowerInvariant()
