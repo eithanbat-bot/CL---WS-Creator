@@ -11,7 +11,7 @@ $DXF_INDEX_FILE = Join-Path $ROOT 'dxf-index.json'
 $DXF_INDEX_DIR = Join-Path $ROOT 'dxf-index'
 $DXF_STATUS_FILE = Join-Path $ROOT 'dxf-index-status.json'
 $DXF_SCAN_SCRIPT = Join-Path $ROOT 'dxf-indexer.ps1'
-$CFG = [ordered]@{ libraryRoot=$DEFAULT_LIBRARY; dxfRoot=$DEFAULT_DXF_LIBRARY; lastScan=$null; count=0; discoveredFiles=0; prsCount=0; dxfCount=0; dxfIndexState='IDLE'; dxfIndexMessage=''; scanErrors=@(); inspectErrors=@(); dxfWorkers=8; dxfNightlyHour=2; dxfRefreshHours=24; dxfAutoRefresh=$true }
+$CFG = [ordered]@{ libraryRoot=$DEFAULT_LIBRARY; dxfRoot=$DEFAULT_DXF_LIBRARY; lastScan=$null; count=0; discoveredFiles=0; prsCount=0; dxfCount=0; dxfIndexState='IDLE'; dxfIndexMessage=''; scanErrors=@(); inspectErrors=@(); dxfWorkers=12; dxfNightlyHour=2; dxfRefreshHours=24; dxfAutoRefresh=$true }
 
 try {
   if(Test-Path -LiteralPath $CFG_FILE){
@@ -21,7 +21,7 @@ try {
 } catch {}
 
 try {
-  if($null -eq $CFG.dxfWorkers){$CFG.dxfWorkers=8}
+  if($null -eq $CFG.dxfWorkers){$CFG.dxfWorkers=12}
   if($null -eq $CFG.dxfNightlyHour){$CFG.dxfNightlyHour=2}
   if($null -eq $CFG.dxfRefreshHours){$CFG.dxfRefreshHours=24}
   if($null -eq $CFG.dxfAutoRefresh){$CFG.dxfAutoRefresh=$true}
@@ -236,7 +236,7 @@ function Start-DxfScan([string]$root,[string]$mode='FULL',[switch]$force){
   try{
     $started=(Get-Date).ToUniversalTime().ToString('o')
     $workerCount=[int]$CFG.dxfWorkers
-    if($workerCount -le 0){$workerCount=8}
+    if($workerCount -le 0){$workerCount=12}
     $workerCount=[math]::Max(1,[math]::Min(12,$workerCount))
 
     $starting=[pscustomobject]@{
