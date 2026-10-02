@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.8.3'
+$BRIDGE_VERSION = '2.8.4'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -959,7 +959,7 @@ $listener.Start()
 Write-Host "CL-WS-Creator PowerShell bridge listening on http://127.0.0.1:$PORT"
 Write-Host "PRS library default: $DEFAULT_LIBRARY"
 Write-Host "DXF library default: $DEFAULT_DXF_LIBRARY"
-Write-Host "DXF workers: $(Get-DxfWorkerCount); nightly refresh hour: $CFG['dxfNightlyHour']"
+Write-Host "DXF workers: $(Get-DxfWorkerCount); nightly refresh hour: $($CFG['dxfNightlyHour'])"
 Initialize-DxfScheduler
 $lastSchedulerCheck=Get-Date
 while($true){
