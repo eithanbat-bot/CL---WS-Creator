@@ -106,6 +106,10 @@ jobs:
 
           if(-not $server.Contains('function Start-DxfScan')){throw 'Server does not contain Start-DxfScan.'}
           if(-not $server.Contains('function Get-DxfShardCandidates')){throw 'Server does not contain the sharded DXF index reader.'}
+          if(-not $server.Contains('function Invoke-DxfScheduler')){throw 'Server does not contain the nightly DXF scheduler.'}
+          if(-not $server.Contains('function Get-DxfWorkerCount')){throw 'Server does not contain DXF worker-count configuration.'}
+          if(-not $server.Contains('AcceptTcpClientAsync')){throw 'Bridge listener is not scheduler-friendly.'}
+          if(-not $server.Contains('/api/dxf-refresh')){throw 'DXF refresh API endpoint is missing.'}
           if($server.Contains('Get-GeometryFiles -root $dxfRoot')){throw 'Server must not use the synchronous DXF walk.'}
           if(-not $server.Contains('DXF_INDEX_NOT_READY')){throw 'Server build API does not reject incomplete DXF indexes.'}
           if(-not $server.Contains('FOUND - DXF')){throw 'Server does not have the DXF-ready status path.'}
@@ -116,6 +120,8 @@ jobs:
 
           if(-not $indexer.Contains('[IO.Directory]::EnumerateFiles')){throw 'DXF indexer is not using the streaming directory enumerator.'}
           if(-not $indexer.Contains('RequestFile')){throw 'DXF indexer does not support request-file startup.'}
+          if(-not $indexer.Contains("$DXF_INDEXER_VERSION = '3.0.0'")){throw 'DXF indexer version is not 3.0.0.'}
+          if(-not $indexer.Contains('WorkerBuckets') -and -not $indexer.Contains('controlled parallel workers')){throw 'DXF indexer does not contain the parallel-worker controller.'}
           if(-not $indexer.Contains('ReparsePoint')){throw 'DXF indexer does not protect against reparse-point recursion.'}
 
           $indexerLine=@($indexer -split [Environment]::NewLine | Where-Object {$_.TrimStart().StartsWith('$DXF_INDEXER_VERSION')}) | Select-Object -First 1
@@ -134,6 +140,8 @@ jobs:
           if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the GitHub self-updater.'}
           if(-not $bat.Contains('Git blob integrity validation')){throw 'Bootstrap launcher does not verify updater integrity.'}
           if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
+          if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
           if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
+          if(-not $html.Contains('id="refreshDxf"')){throw 'Task pane HTML is missing the DXF refresh button.'}
 
           Write-Host ("Architecture checks: OK. Bridge "+$bridgeVersion+" / DXF indexer "+$indexerVersion) -ForegroundColor Green
