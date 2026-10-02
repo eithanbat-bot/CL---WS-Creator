@@ -178,8 +178,7 @@ function Stop-RunningDxfWorkers([string]$root){
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
       Where-Object {
         $_.ProcessId -ne $PID -and
-        ([string]$_.CommandLine -match 'dxf-indexer\.ps1') -and
-        ([string]$_.CommandLine -match $rootPattern)
+        ([string]$_.CommandLine -match 'dxf-indexer\.ps1')
       } |
       ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
