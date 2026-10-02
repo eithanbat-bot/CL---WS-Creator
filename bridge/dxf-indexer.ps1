@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$DXF_INDEXER_VERSION = '3.0.0'
+$DXF_INDEXER_VERSION = '3.0.1'
 
 function Get-PowerShellExe {
   if([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT){
@@ -27,10 +27,10 @@ function Normalize-Key([string]$s) {
 
 function Shard-Key([string]$part) {
   $n = Normalize-Key $part
-  if([string]::IsNullOrWhiteSpace($n)){ return '__' }
-  if($n.Length -ge 3){ return $n.Substring(0,3) }
+  if([string]::IsNullOrWhiteSpace($n)){ return 'S___' }
+  if($n.Length -ge 3){ return 'S_'+$n.Substring(0,3) }
   while($n.Length -lt 3){ $n += '_' }
-  $n
+  return 'S_'+$n
 }
 
 function Get-DxfFiles([string]$dir) {
