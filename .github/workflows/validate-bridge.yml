@@ -113,6 +113,8 @@ jobs:
           if($server.Contains('Get-GeometryFiles -root $dxfRoot')){throw 'Server must not use the synchronous DXF walk.'}
           if(-not $server.Contains('DXF_INDEX_NOT_READY')){throw 'Server build API does not reject incomplete DXF indexes.'}
           if(-not $server.Contains('FOUND - DXF')){throw 'Server does not have the DXF-ready status path.'}
+          if(-not $server.Contains('If any PRS matches at this stage, use the first PRS found.')){throw 'Server does not enforce PRS-first geometry selection.'}
+          if(-not $server.Contains('Only when no PRS exists, use the first DXF found.')){throw 'Server does not enforce first-DXF fallback.'}
 
           $serverLine=@($server -split [Environment]::NewLine | Where-Object {$_.TrimStart().StartsWith('$BRIDGE_VERSION')}) | Select-Object -First 1
           $bridgeVersion=[regex]::Match($serverLine,"'([^']+)'").Groups[1].Value
