@@ -195,7 +195,7 @@ function Stop-RunningDxfWorkers([string]$root){
 
 function Start-DxfScan([string]$root,[string]$mode='FULL',[switch]$force){
   $status=Get-DxfStatus
-  $requiredIndexerVersion='3.0.0'
+  $requiredIndexerVersion='3.0.1'
   $rootFull=[IO.Path]::GetFullPath(([string]$root).Trim())
   $sameRoot=([string]$status.root).Equals($rootFull,[StringComparison]::OrdinalIgnoreCase)
 
@@ -302,10 +302,10 @@ function Start-DxfScan([string]$root,[string]$mode='FULL',[switch]$force){
 }
 function Dxf-ShardKey([string]$part){
   $n=Normalize -s $part
-  if([string]::IsNullOrWhiteSpace($n)){return '__'}
-  if($n.Length -ge 3){return $n.Substring(0,3)}
+  if([string]::IsNullOrWhiteSpace($n)){return 'S___'}
+  if($n.Length -ge 3){return 'S_'+$n.Substring(0,3)}
   while($n.Length -lt 3){$n+='_'}
-  return $n
+  return 'S_'+$n
 }
 
 function Get-DxfShardCandidates([string]$root,[string]$part){
@@ -317,7 +317,7 @@ function Get-DxfShardCandidates([string]$root,[string]$part){
     $manifest=Get-Content -LiteralPath $DXF_INDEX_FILE -Raw -Encoding UTF8|ConvertFrom-Json
     if([string]$manifest.schema -ne 'cl-ws-creator/dxf-index/3'){return @()}
     if(-not ([string]$manifest.root).Equals([string]$root,[StringComparison]::OrdinalIgnoreCase)){return @()}
-    if([string]$manifest.indexerVersion -ne '3.0.0'){return @()}
+    if([string]$manifest.indexerVersion -ne '3.0.1'){return @()}
   }catch{return @()}
 
   $shard=Join-Path $DXF_INDEX_DIR ((Dxf-ShardKey -part $part)+'.tsv')
