@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.8.5'
+$BRIDGE_VERSION = '2.8.6'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -902,18 +902,48 @@ function Handle-Request($req){
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
       $worker=Join-Path $BridgeDir 'create-sigmanest-ws.ps1'
-      $raw=& (Get-PowerShellExe) -NoProfile -ExecutionPolicy Bypass -File $worker -RequestFile $reqFile 2>&1 | Out-String
-      $rawText=[string]$raw
+      # Run the SigmaNEST creator as a real child process so its exit code,
+      # stdout and stderr are preserved even when COM initialization crashes.
+      $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
+      $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
+      $psi=New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName=Get-PowerShellExe
+      $psi.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$reqFile+'"'
+      $psi.WorkingDirectory=$BridgeDir
+      $psi.UseShellExecute=$false
+      $psi.CreateNoWindow=$true
+      $psi.RedirectStandardOutput=$true
+      $psi.RedirectStandardError=$true
+      $proc=New-Object System.Diagnostics.Process
+      $proc.StartInfo=$psi
+      [void]$proc.Start()
+      $stdoutTask=$proc.StandardOutput.ReadToEndAsync()
+      $stderrTask=$proc.StandardError.ReadToEndAsync()
+      if(-not $proc.WaitForExit(600000)){
+        try{$proc.Kill()}catch{}
+        throw 'SigmaNEST creator timed out after 10 minutes.'
+      }
+      $stdout=$stdoutTask.GetAwaiter().GetResult()
+      $stderr=$stderrTask.GetAwaiter().GetResult()
+      $exitCode=$proc.ExitCode
+      $proc.Dispose()
+      [string]$stdout|Set-Content -LiteralPath $creatorOut -Encoding UTF8
+      [string]$stderr|Set-Content -LiteralPath $creatorErr -Encoding UTF8
+      $rawText=([string]$stdout).Trim()
+      $errText=([string]$stderr).Trim()
       if([string]::IsNullOrWhiteSpace($rawText)){
-        throw 'SigmaNEST creator returned no output. Check SigmaNEST is running and that the creator script can start PowerShell COM automation.'
+        $detail='SigmaNEST creator returned no stdout. Exit code: '+$exitCode+'.'
+        if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' STDERR: '+$errText}
+        $detail+=' Creator output files: '+$creatorOut+' ; '+$creatorErr
+        throw $detail
       }
-      try{$data=$rawText.Trim()|ConvertFrom-Json}catch{
-        throw ('SigmaNEST creator returned invalid JSON: '+$rawText.Trim())
+      try{$data=$rawText|ConvertFrom-Json}catch{
+        throw ('SigmaNEST creator returned invalid JSON. Exit code: '+$exitCode+'. STDERR: '+$errText+'. STDOUT: '+$rawText)
       }
-      if($null -eq $data){throw 'SigmaNEST creator returned no result.'}
+      if($null -eq $data){throw ('SigmaNEST creator returned no result. Exit code: '+$exitCode+'. STDERR: '+$errText)}
       if(-not [bool]$data.ok){
         $creatorError=[string]$data.error
-        if([string]::IsNullOrWhiteSpace($creatorError)){$creatorError='SigmaNEST creator failed without an error message. Raw output: '+$rawText.Trim()}
+        if([string]::IsNullOrWhiteSpace($creatorError)){$creatorError='SigmaNEST creator failed. Exit code: '+$exitCode+'. STDERR: '+$errText}
         throw $creatorError
       }
 
