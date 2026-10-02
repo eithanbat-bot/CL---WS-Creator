@@ -140,8 +140,9 @@ jobs:
           if(-not $updater.Contains('$ApiContents="https://api.github.com/repos/$Repo/contents/bridge?ref=$Branch"')){throw 'Updater does not use the GitHub Contents API for bridge discovery.'}
           if(-not $updater.Contains("$_.path -like 'bridge/*'")){throw 'Updater does not filter GitHub bridge contents correctly.'}
 
-          if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the GitHub self-updater.'}
+          if(-not $bat.Contains('api.github.com/repos/eithanbat-bot/CL---WS-Creator/contents/bridge/update-and-start.ps1?ref=main')){throw 'Bootstrap launcher does not point to the GitHub Contents API self-updater.'}
           if(-not $bat.Contains('Git blob integrity validation')){throw 'Bootstrap launcher does not verify updater integrity.'}
+          if(-not $bat.Contains('FromBase64String')){throw 'Bootstrap launcher does not decode exact GitHub updater bytes.'}
           if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
           if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
           if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
