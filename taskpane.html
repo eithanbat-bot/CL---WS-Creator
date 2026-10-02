@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CL - WS Creator</title>
+  <link rel="stylesheet" href="taskpane.css?v=__BUILD__">
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<main class="app">
+  <header class="hero">
+    <div>
+      <div class="eyebrow">SIGMANEST AUTOMATION</div>
+      <h1>CL - WS Creator</h1>
+      <p>Choose a cutting-list workbook, select the CL sheets to use, find geometry on the server, then build the SigmaNEST job. A Summary and Part Review worksheet are created in the active Excel workbook.</p>
+    </div>
+    <div id="statusPill" class="pill neutral">Starting...</div>
+  </header>
+
+  <section class="card">
+    <div class="sectionTitle">1. Choose CL workbook</div>
+    <div class="row">
+      <input id="clFile" type="file" accept=".xlsx,.xls" hidden>
+      <button id="chooseCL" class="primary">Choose CL Workbook</button>
+      <button id="clearCL" class="secondary" type="button" disabled>Clear</button>
+    </div>
+    <div id="clFileName" class="fileName">No CL workbook selected.</div>
+    <div id="clFileStatus" class="muted">Select the cutting-list .xlsx/.xls file from this PC.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">2. CL sheets</div>
+    <div class="row between">
+      <button id="refreshSheets" class="secondary" type="button" disabled>Reload CL sheets</button>
+      <div id="sheetCount" class="muted inline">0 selected</div>
+    </div>
+    <div id="sheetList" class="sheetList empty">Choose a CL workbook first.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">3. Geometry Libraries</div>
+    <label for="libraryPath">Main .PRS server folder</label>
+    <input id="libraryPath" type="text" placeholder="S:\SNDataX1\PARTS">
+    <label for="dxfPath">Main .DXF server folder</label>
+    <div class="row">
+      <input id="dxfPath" type="text" placeholder="Y:\">
+      <button id="scanLibrary" class="secondary" type="button">Scan Both</button>
+    </div>
+    <div id="libraryStatus" class="muted">PRS is searched recursively under S:\SNDataX1\PARTS and DXF is searched recursively under Y:\.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">4. Build</div>
+    <label for="jobName">Job name</label>
+    <input id="jobName" type="text" placeholder="J032-26">
+    <div class="row actionRow">
+      <button id="preview" class="secondary" type="button" disabled>Preview CL</button>
+      <button id="build" class="primary" type="button" disabled>Create SigmaNEST Job</button>
+    </div>
+    <div id="buildStatus" class="muted">Choose a CL workbook to begin.</div>
+  </section>
+
+  <section class="card">
+    <div class="sectionTitle">Results</div>
+    <div class="summaryGrid">
+      <div><strong id="partsFound">0</strong><span>CL lines</span></div>
+      <div><strong id="geometryFound">0</strong><span>Ready</span></div>
+      <div><strong id="geometryMissing">0</strong><span>Review/Missing</span></div>
+      <div><strong id="totalQty">0</strong><span>Total Qty</span></div>
+    </div>
+    <div class="tableWrap">
+      <table id="resultTable">
+        <thead><tr><th>Part</th><th>Qty</th><th>Material</th><th>Thk</th><th>Source</th><th>Match</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer><span>Build 2.4.0 — Self-updating bridge + recursive PRS/DXF libraries + background DXF index</span><span id="bridgeVersion">Local bridge: 127.0.0.1:17832</span></footer>
+</main>
+
+<script src="src/clParser.js?v=__BUILD__"></script>
+<script src="taskpane.js?v=__BUILD__"></script>
+</body>
+</html>
