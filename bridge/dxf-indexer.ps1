@@ -10,17 +10,13 @@ $ErrorActionPreference = 'Continue'
 $DXF_INDEXER_VERSION = '3.0.0'
 
 function Get-PowerShellExe {
-  try {
-    if($IsWindows) {
-      $candidate = Join-Path $PSHOME 'powershell.exe'
-      if(Test-Path -LiteralPath $candidate){ return $candidate }
-      return (Get-Command powershell.exe -ErrorAction Stop).Source
-    }
-  } catch {}
-  try {
-    $candidate = Join-Path $PSHOME 'pwsh'
-    if(Test-Path -LiteralPath $candidate){ return $candidate }
-  } catch {}
+  if([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT){
+    $candidate=Join-Path $PSHOME 'powershell.exe'
+    if(Test-Path -LiteralPath $candidate){return $candidate}
+    return (Get-Command powershell.exe -ErrorAction Stop).Source
+  }
+  $candidate=Join-Path $PSHOME 'pwsh'
+  if(Test-Path -LiteralPath $candidate){return $candidate}
   return (Get-Command pwsh -ErrorAction Stop).Source
 }
 
@@ -85,23 +81,27 @@ function Read-ControllerRequest {
 }
 
 $request = $null
-try {
-  $request = Read-ControllerRequest
-  if($request){
+if(-not [string]::IsNullOrWhiteSpace($RequestFile)){
+  if(-not(Test-Path -LiteralPath $RequestFile)){ throw "DXF indexer request file does not exist: $RequestFile" }
+  try{
+    $requestText=Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8
+    $request=$requestText | ConvertFrom-Json
     if($request.Root){$Root=[string]$request.Root}
     if($request.IndexFile){$IndexFile=[string]$request.IndexFile}
     if($request.StatusFile){$StatusFile=[string]$request.StatusFile}
     if($request.Role){$Role=[string]$request.Role}
-  }
-} finally {
-  if($RequestFile){
+  } finally {
     Remove-Item -LiteralPath $RequestFile -Force -ErrorAction SilentlyContinue
   }
 }
 
 if([string]::IsNullOrWhiteSpace($Root)){ throw 'DXF indexer Root is required.' }
-if([string]::IsNullOrWhiteSpace($IndexFile)){ throw 'DXF indexer IndexFile is required.' }
-if([string]::IsNullOrWhiteSpace($StatusFile)){ throw 'DXF indexer StatusFile is required.' }
+if($Role -eq 'WORKER'){
+  if([string]::IsNullOrWhiteSpace($RequestFile) -and -not $request){ throw 'DXF worker request is required.' }
+} else {
+  if([string]::IsNullOrWhiteSpace($IndexFile)){ throw 'DXF indexer IndexFile is required.' }
+  if([string]::IsNullOrWhiteSpace($StatusFile)){ throw 'DXF indexer StatusFile is required.' }
+}
 
 $ROOT_PARENT = Split-Path -Parent $StatusFile
 $LOG_FILE = Join-Path $ROOT_PARENT 'dxf-indexer.log'
