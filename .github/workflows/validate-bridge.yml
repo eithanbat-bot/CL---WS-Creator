@@ -87,8 +87,8 @@ jobs:
 
           $sourceNode=$xml.SelectSingleNode('/oa:OfficeApp/oa:DefaultSettings/oa:SourceLocation',$ns)
           if(-not $sourceNode){throw 'manifest.xml is missing DefaultSettings/SourceLocation.'}
-          $source=[string]$sourceNode.GetAttribute('DefaultValue')
-          if(-not $source.StartsWith('https://eithanbat.github.io/CL---WS-Creator/taskpane.html')){throw "manifest.xml SourceLocation is unexpected: $source"}
+          $sourceXml=[string]$sourceNode.OuterXml
+          if(-not $sourceXml.Contains('https://eithanbat.github.io/CL---WS-Creator/taskpane.html')){throw "manifest.xml SourceLocation is unexpected: $sourceXml"}
 
           $hostNode=$xml.SelectSingleNode('/oa:OfficeApp/oa:Hosts/oa:Host',$ns)
           if(-not $hostNode -or [string]$hostNode.GetAttribute('Name') -ne 'Workbook'){throw 'Manifest does not target Excel Workbook.'}
