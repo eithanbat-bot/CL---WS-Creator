@@ -13,7 +13,7 @@ try{[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls1
 
 $Repo='eithanbat-bot/CL---WS-Creator'
 $Branch='main'
-$ApiTree="https://api.github.com/repos/$Repo/git/trees/$Branch?recursive=1"
+$ApiContents="https://api.github.com/repos/$Repo/contents/bridge?ref=$Branch"
 $RawBase="https://raw.githubusercontent.com/$Repo/$Branch/"
 $Port=17832
 
@@ -119,26 +119,39 @@ $tmpRoot=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-update-'+[Guid]::NewGuid()
 try{
   New-Item -ItemType Directory -Path $tmpRoot -Force|Out-Null
   Say 'Checking GitHub for the newest bridge runtime...'
-  $tree=Invoke-Json $ApiTree
-  if([bool]$tree.truncated){throw 'GitHub bridge tree response was truncated; refusing an incomplete update.'}
+  # Use the repository Contents API rather than the Git Trees API. Some
+  # corporate/network proxies return 404 for /git/trees even when normal
+  # repository APIs work. The bridge folder is flat, so the Contents API
+  # gives us every runtime file and its Git blob SHA directly.
+  $contents=Invoke-Json $ApiContents
+  if($null -eq $contents){throw 'GitHub returned no bridge contents.'}
 
   $entries=@(
-    $tree.tree|
+    @($contents)|
       Where-Object{
-        $_.type -eq 'blob' -and
+        $_.type -eq 'file' -and
         $_.path -like 'bridge/*' -and
-        $_.path -notmatch '^bridge/(config\.json|dxf-index\.json|dxf-index-status\.json)$' -and
+        $_.path -notmatch '^bridge/(config\\.json|dxf-index\\.json|dxf-index-status\\.json)$' -and
         $_.path -notmatch '^bridge/dxf-index/' -and
         $_.path -notmatch '^bridge/backup/'
       }|
-      ForEach-Object{[pscustomobject]@{relative=[string]$_.path.Substring(7);sha=[string]$_.sha}}
+      ForEach-Object{
+        [pscustomobject]@{
+          relative=[string]$_.name
+          sha=[string]$_.sha
+          downloadUrl=[string]$_.download_url
+        }
+      }
   )
   if($entries.Count -eq 0){throw 'GitHub returned no bridge runtime files.'}
 
   foreach($entry in $entries){
     $stage=Join-Path $tmpRoot $entry.relative
-    $url=$RawBase+'bridge/'+$entry.relative.Replace('\','/')
-    Say "Verifying bridge\$($entry.relative)..."
+    $url=[string]$entry.downloadUrl
+    if([string]::IsNullOrWhiteSpace($url)){
+      $url=$RawBase+'bridge/'+$entry.relative.Replace('\\','/')
+    }
+    Say "Verifying bridge\\$($entry.relative)..."
     Download-Verified $url $stage $entry.sha
     $ext=[IO.Path]::GetExtension($entry.relative).ToLowerInvariant()
     if($ext -eq '.ps1' -and -not(Test-Syntax $stage)){throw "Downloaded $($entry.relative) failed PowerShell syntax validation."}
