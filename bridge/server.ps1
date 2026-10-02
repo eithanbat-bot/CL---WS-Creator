@@ -23,10 +23,10 @@ try {
 
 try {
   # DXF indexing is intentionally configured at the bridge maximum.
-  $CFG.dxfWorkers=12
-  if($null -eq $CFG.dxfNightlyHour){$CFG.dxfNightlyHour=2}
-  if($null -eq $CFG.dxfRefreshHours){$CFG.dxfRefreshHours=24}
-  if($null -eq $CFG.dxfAutoRefresh){$CFG.dxfAutoRefresh=$true}
+  $CFG['dxfWorkers']=12
+  if($null -eq $CFG['dxfNightlyHour']){$CFG['dxfNightlyHour']=2}
+  if($null -eq $CFG['dxfRefreshHours']){$CFG['dxfRefreshHours']=24}
+  if($null -eq $CFG['dxfAutoRefresh']){$CFG['dxfAutoRefresh']=$true}
 } catch {}
 
 function Send-Json($client, [int]$status, $obj) {
@@ -237,7 +237,7 @@ function Start-DxfScan([string]$root,[string]$mode='FULL',[switch]$force){
 
   try{
     $started=(Get-Date).ToUniversalTime().ToString('o')
-    $workerCount=[int]$CFG.dxfWorkers
+    $workerCount=[int]$CFG['dxfWorkers']
     if($workerCount -le 0){$workerCount=12}
     $workerCount=[math]::Max(1,[math]::Min(12,$workerCount))
 
@@ -417,17 +417,17 @@ function Scan-Libraries([string]$prsRoot,[string]$dxfRoot){
   $dxfCount=0
   try{$dxfCount=[int]$dxfStatus.filesFound}catch{}
   $total=$prsFiles.Count+$dxfCount
-  $CFG.libraryRoot=$prsRoot
-  $CFG.dxfRoot=$dxfRoot
-  $CFG.lastScan=(Get-Date).ToUniversalTime().ToString('o')
-  $CFG.count=$total
-  $CFG.discoveredFiles=$total
-  $CFG.prsCount=$prsFiles.Count
-  $CFG.dxfCount=$dxfCount
-  $CFG.dxfIndexState=[string]$dxfStatus.state
-  $CFG.dxfIndexMessage=[string]$dxfStatus.message
-  $CFG.scanErrors=@($scanErrors)
-  $CFG.inspectErrors=@()
+  $CFG['libraryRoot']=$prsRoot
+  $CFG['dxfRoot']=$dxfRoot
+  $CFG['lastScan']=(Get-Date).ToUniversalTime().ToString('o')
+  $CFG['count']=$total
+  $CFG['discoveredFiles']=$total
+  $CFG['prsCount']=$prsFiles.Count
+  $CFG['dxfCount']=$dxfCount
+  $CFG['dxfIndexState']=[string]$dxfStatus.state
+  $CFG['dxfIndexMessage']=[string]$dxfStatus.message
+  $CFG['scanErrors']=@($scanErrors)
+  $CFG['inspectErrors']=@()
   try{($CFG|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $CFG_FILE -Encoding UTF8}catch{}
 
   [pscustomobject]@{
@@ -622,7 +622,7 @@ function Write-Job([string]$root,[string]$name,$parts){
 
 function Get-DxfWorkerCount(){
   try{
-    $n=[int]$CFG.dxfWorkers
+    $n=[int]$CFG['dxfWorkers']
     if($n -le 0){$n=8}
     return [math]::Max(1,[math]::Min(12,$n))
   }catch{return 8}
@@ -639,7 +639,7 @@ function Get-DxfRefreshAgeHours($status){
 
 function Get-NextDxfRefreshLocal(){
   try{
-    $hour=[int]$CFG.dxfNightlyHour
+    $hour=[int]$CFG['dxfNightlyHour']
     if($hour -lt 0 -or $hour -gt 23){$hour=2}
   }catch{$hour=2}
   $now=Get-Date
@@ -650,20 +650,20 @@ function Get-NextDxfRefreshLocal(){
 
 function Initialize-DxfScheduler(){
   try{
-    if($CFG.dxfAutoRefresh -ne $true){return}
+    if($CFG['dxfAutoRefresh'] -ne $true){return}
     $status=Get-DxfStatus
     if([string]$status.state -eq 'RUNNING'){return}
     if(-not(Test-Path -LiteralPath $DXF_INDEX_FILE) -or -not(Test-Path -LiteralPath $DXF_INDEX_DIR)){
-      Start-DxfScan -root ([string]$(if($CFG.dxfRoot){$CFG.dxfRoot}else{$DEFAULT_DXF_LIBRARY})) -mode 'FULL' | Out-Null
+      Start-DxfScan -root ([string]$(if($CFG['dxfRoot']){$CFG['dxfRoot']}else{$DEFAULT_DXF_LIBRARY})) -mode 'FULL' | Out-Null
       return
     }
     try{
       $age=Get-DxfRefreshAgeHours -status $status
       $hour=(Get-Date).Hour
-      $nightlyHour=[int]$CFG.dxfNightlyHour
+      $nightlyHour=[int]$CFG['dxfNightlyHour']
       if($nightlyHour -lt 0 -or $nightlyHour -gt 23){$nightlyHour=2}
-      if($age -ge [double]$CFG.dxfRefreshHours -and $hour -ge $nightlyHour -and $hour -lt ($nightlyHour+2)){
-        Start-DxfScan -root ([string]$(if($CFG.dxfRoot){$CFG.dxfRoot}else{$DEFAULT_DXF_LIBRARY})) -mode 'REFRESH' -force | Out-Null
+      if($age -ge [double]$CFG['dxfRefreshHours'] -and $hour -ge $nightlyHour -and $hour -lt ($nightlyHour+2)){
+        Start-DxfScan -root ([string]$(if($CFG['dxfRoot']){$CFG['dxfRoot']}else{$DEFAULT_DXF_LIBRARY})) -mode 'REFRESH' -force | Out-Null
       }
     }catch{}
   }catch{}
@@ -671,18 +671,18 @@ function Initialize-DxfScheduler(){
 
 function Invoke-DxfScheduler(){
   try{
-    if($CFG.dxfAutoRefresh -ne $true){return}
+    if($CFG['dxfAutoRefresh'] -ne $true){return}
     $status=Get-DxfStatus
     if([string]$status.state -eq 'RUNNING'){return}
     if(-not(Test-Path -LiteralPath $DXF_INDEX_FILE) -or -not(Test-Path -LiteralPath $DXF_INDEX_DIR)){return}
 
     $now=Get-Date
-    $nightlyHour=[int]$CFG.dxfNightlyHour
+    $nightlyHour=[int]$CFG['dxfNightlyHour']
     if($nightlyHour -lt 0 -or $nightlyHour -gt 23){$nightlyHour=2}
     if($now.Hour -lt $nightlyHour -or $now.Hour -ge ($nightlyHour+2)){return}
 
     $age=Get-DxfRefreshAgeHours -status $status
-    $interval=[double]$CFG.dxfRefreshHours
+    $interval=[double]$CFG['dxfRefreshHours']
     if($age -ge $interval){
       Start-DxfScan -root $DEFAULT_DXF_LIBRARY -mode 'REFRESH' -force | Out-Null
     }
@@ -692,7 +692,7 @@ function Invoke-DxfScheduler(){
 function Handle-Request($req){
   if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
   if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG.libraryRoot;dxfRoot=$CFG.dxfRoot;lastScan=$CFG.lastScan;count=[int]$CFG.count;discoveredFiles=[int]$CFG.discoveredFiles;prsCount=[int]$CFG.prsCount;dxfCount=[int]$CFG.dxfCount;dxfIndexState=[string]$CFG.dxfIndexState;dxfIndexMessage=[string]$CFG.dxfIndexMessage;sigmaNestCom=$true;bridge='PowerShell'}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG['libraryRoot'];dxfRoot=$CFG['dxfRoot'];lastScan=$CFG['lastScan'];count=[int]$CFG['count'];discoveredFiles=[int]$CFG['discoveredFiles'];prsCount=[int]$CFG['prsCount'];dxfCount=[int]$CFG['dxfCount'];dxfIndexState=[string]$CFG['dxfIndexState'];dxfIndexMessage=[string]$CFG['dxfIndexMessage'];sigmaNestCom=$true;bridge='PowerShell'}}
   }
   if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
     $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
@@ -705,7 +705,7 @@ function Handle-Request($req){
   }
   if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
     $status=Get-DxfStatus
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;mode=[string]$status.mode;started=$status.started;finished=$status.finished;generatedUtc=$status.generatedUtc;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});exitCode=$(try{[int]$status.exitCode}catch{0});workers=$(try{[int]$status.workers}catch{[int]$CFG.dxfWorkers});workersCompleted=$(try{[int]$status.workersCompleted}catch{0});directoriesVisited=$(try{[int]$status.directoriesVisited}catch{0});elapsedSeconds=$(try{[double]$status.elapsedSeconds}catch{0});logFile=[string]$status.logFile;workDirectory=[string]$status.workDirectory;nextRefreshLocal=(Get-NextDxfRefreshLocal)}}
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;mode=[string]$status.mode;started=$status.started;finished=$status.finished;generatedUtc=$status.generatedUtc;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});exitCode=$(try{[int]$status.exitCode}catch{0});workers=$(try{[int]$status.workers}catch{[int]$CFG['dxfWorkers']});workersCompleted=$(try{[int]$status.workersCompleted}catch{0});directoriesVisited=$(try{[int]$status.directoriesVisited}catch{0});elapsedSeconds=$(try{[double]$status.elapsedSeconds}catch{0});logFile=[string]$status.logFile;workDirectory=[string]$status.workDirectory;nextRefreshLocal=(Get-NextDxfRefreshLocal)}}
   }
   if($req.Path -eq '/api/dxf-refresh' -and $req.Method -eq 'POST'){
     $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
@@ -742,9 +742,9 @@ function Handle-Request($req){
     if(
       -not $script:INDEX -or
       $script:INDEX.Count -eq 0 -or
-      [string]$CFG.libraryRoot -ne [string]$prsRoot -or
-      [string]$CFG.dxfRoot -ne [string]$dxfRoot -or
-      ([string]$dxfStatus.state -eq 'COMPLETE' -and [string]$CFG.dxfIndexState -ne 'COMPLETE')
+      [string]$CFG['libraryRoot'] -ne [string]$prsRoot -or
+      [string]$CFG['dxfRoot'] -ne [string]$dxfRoot -or
+      ([string]$dxfStatus.state -eq 'COMPLETE' -and [string]$CFG['dxfIndexState'] -ne 'COMPLETE')
     ){
       Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot|Out-Null
     }
@@ -959,7 +959,7 @@ $listener.Start()
 Write-Host "CL-WS-Creator PowerShell bridge listening on http://127.0.0.1:$PORT"
 Write-Host "PRS library default: $DEFAULT_LIBRARY"
 Write-Host "DXF library default: $DEFAULT_DXF_LIBRARY"
-Write-Host "DXF workers: $(Get-DxfWorkerCount); nightly refresh hour: $CFG.dxfNightlyHour"
+Write-Host "DXF workers: $(Get-DxfWorkerCount); nightly refresh hour: $CFG['dxfNightlyHour']"
 Initialize-DxfScheduler
 $lastSchedulerCheck=Get-Date
 while($true){
