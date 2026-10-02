@@ -81,19 +81,20 @@ function Read-JsonFile([string]$Path) {
 function Read-ControllerRequest {
   if([string]::IsNullOrWhiteSpace($RequestFile)){ return }
   if(-not(Test-Path -LiteralPath $RequestFile)){ throw "DXF indexer request file does not exist: $RequestFile" }
-  $r = Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8 | ConvertFrom-Json
-  if([string]::IsNullOrWhiteSpace($Root) -and $r.Root){$script:Root=[string]$r.Root}
-  if([string]::IsNullOrWhiteSpace($IndexFile) -and $r.IndexFile){$script:IndexFile=[string]$r.IndexFile}
-  if([string]::IsNullOrWhiteSpace($StatusFile) -and $r.StatusFile){$script:StatusFile=[string]$r.StatusFile}
-  if($r.Role){$script:Role=[string]$r.Role}
-  return $r
+  Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
 $request = $null
 try {
   $request = Read-ControllerRequest
+  if($request){
+    if($request.Root){$Root=[string]$request.Root}
+    if($request.IndexFile){$IndexFile=[string]$request.IndexFile}
+    if($request.StatusFile){$StatusFile=[string]$request.StatusFile}
+    if($request.Role){$Role=[string]$request.Role}
+  }
 } finally {
-  if($Role -eq 'CONTROLLER' -and $RequestFile){
+  if($RequestFile){
     Remove-Item -LiteralPath $RequestFile -Force -ErrorAction SilentlyContinue
   }
 }
