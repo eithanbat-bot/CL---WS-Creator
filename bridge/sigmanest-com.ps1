@@ -102,7 +102,7 @@ function SN-Get-NestedObject($obj,[string[]]$names){
   }
   @($out)
 }
-function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),[int]$expectedInt=-2147483648){
+function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
   if($null -eq $obj){return $null}
   foreach($name in $names){
     try{
@@ -129,12 +129,17 @@ function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',[
   }
   return $null
 }
-function SN-Set-PartField($partObj,[string[]]$names,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),[int]$expectedInt=-2147483648){
+function SN-Set-PartField($partObj,[string[]]$names,$value,[string]$expectedText='',$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
   $set=SN-Try-SetField -obj $partObj -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
   if($set){return [pscustomobject]@{path=$set;object=$partObj}}
-  foreach($child in SN-Get-NestedObject -obj $partObj -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec')){
+  $children=@(SN-Get-NestedObject -obj $partObj -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec','PartInfo','PartParameterData'))
+  foreach($child in $children){
     $nested=SN-Try-SetField -obj $child.object -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
     if($nested){return [pscustomobject]@{path=($child.name+'.'+$nested);object=$child.object}}
+    foreach($grand in SN-Get-NestedObject -obj $child.object -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec','PartInfo','PartParameterData')){
+      $nested2=SN-Try-SetField -obj $grand.object -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
+      if($nested2){return [pscustomobject]@{path=($child.name+'.'+$grand.name+'.'+$nested2);object=$grand.object}}
+    }
   }
   return $null
 }
@@ -157,7 +162,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
 
     if(-not [string]::IsNullOrWhiteSpace($material)){
       $setInfo=$null
-      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Material','MaterialName','Mat') -value $material -expectedText $material}catch{
+      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Material','MaterialName','Mat','MatName','MaterialType') -value $material -expectedText $material}catch{
         if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating material for "'+$targetName+'" (0x80010108).')}
       }
       if(-not $setInfo){throw ('CL material "'+$material+'" could not be written/read back on imported workspace part "'+$targetName+'".')}
@@ -165,14 +170,14 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
 
     if(-not [double]::IsNaN($thickness)){
       $setInfo=$null
-      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Thickness','SheetThickness','Thk','MaterialThickness') -value $thickness -expectedNumber $thickness}catch{
+      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -value $thickness -expectedNumber $thickness}catch{
         if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating thickness for "'+$targetName+'" (0x80010108).')}
       }
       if(-not $setInfo){throw ('CL thickness '+$thickness+'mm could not be written/read back on imported workspace part "'+$targetName+'".')}
     }
 
     $setInfo=$null
-    try{$setInfo=SN-Set-PartField -partObj $partObj -names @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered') -value $qty -expectedInt $qty}catch{
+    try{$setInfo=SN-Set-PartField -partObj $partObj -names @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -value $qty -expectedInt $qty}catch{
       if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating quantity for "'+$targetName+'" (0x80010108).')}
     }
     if(-not $setInfo){throw ('CL quantity '+$qty+' could not be written/read back on imported workspace part "'+$targetName+'".')}
