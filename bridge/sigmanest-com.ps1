@@ -370,13 +370,6 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
       throw ('CL quantity '+$qty+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
     }
     $row.quantityProperty=[string]$setInfo.path
-    try{
-      [void](SN-Notify-PartRecordUpdated -setInfo $setInfo)
-    }catch{
-      if(SN-IsDisconnected $_){
-        throw ('SigmaNEST COM disconnected while committing CL part data for "'+$targetName+'" (0x80010108).')
-      }
-    }
     $updated += [pscustomobject]$row
   }
   @($updated)
@@ -440,32 +433,6 @@ function SN-Verify-WorkspaceCLData($app,$requestParts){
     $source=[string]$rp.sourcePath
     $found=SN-Find-WorkspacePartExact -app $app -targetName $target -sourcePath $source -usedIndices @()
     if($null -eq $found){throw ('Post-save verification could not find SigmaNEST part "'+$target+'".')}
-    if(-not (SN-Verify-PartIdentity -partObj $found.part -targetName $target -sourcePath $source)){
-      throw ('Post-save verification identity failed for "'+$target+'".')
-    }
-    $material=[string]$rp.sigmaMaterial
-    if(-not [string]::IsNullOrWhiteSpace($material)){
-      $m=SN-Read-PartField -partObj $found.part -aliases @('Material','MaterialName','Mat','MatName','MaterialType') -expectedText $material
-      if($null -eq $m){throw ('Post-save verification failed for "'+$target+'": material is not "'+$material+'".')}
-    }
-    $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
-    if(-not [double]::IsNaN($thickness)){
-      $t=SN-Read-PartField -partObj $found.part -aliases @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -expectedNumber $thickness
-      if($null -eq $t){throw ('Post-save verification failed for "'+$target+'": thickness is not '+$thickness+'mm.')}
-    }
-    $qty=SN-Scalar-Int -value $rp.qty -default 1
-    if($qty -lt 1){$qty=1}
-    $q=SN-Read-PartField -partObj $found.part -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
-    if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
-  }
-  return $true
-}
-function SN-Verify-WorkspaceCLData($app,$requestParts){
-  foreach($rp in @($requestParts)){
-    $target=[string]$rp.part
-    $source=[string]$rp.sourcePath
-    $found=SN-Find-WorkspacePartExact -app $app -targetName $target -sourcePath $source -usedIndices @()
-    if($null -eq $found){throw ('Post-save verification could not find SigmaNEST part "'+$target+'".')}
     $material=[string]$rp.sigmaMaterial
     if(-not [string]::IsNullOrWhiteSpace($material)){
       $m=SN-Read-PartField -partObj $found.part -aliases @('Material','MaterialName','Mat','MatName','MaterialType') -expectedText $material
@@ -496,21 +463,54 @@ function SN-Get-NewPart($app,$beforeCount,[string]$label){
   throw ('SigmaNEST added "'+$label+'" but the new PartsList item could not be accessed. PartsList.Count='+$afterCount)
 }
 
+function SN-AllMemberDefinitions($obj){
+  if($null -eq $obj){return @()}
+  try{
+    return @($obj | Get-Member -MemberType Methods,Properties,ParameterizedProperty,CodeProperty,NoteProperty,ScriptProperty,Fields -ErrorAction Stop |
+      ForEach-Object {[pscustomobject]@{Name=[string]$_.Name;Type=[string]$_.MemberType;Definition=[string]$_.Definition}})
+  }catch{return @()}
+}
+function SN-ComPropertyNamesAll($obj){
+  return @((SN-AllMemberDefinitions $obj)|Where-Object {$_.Type -match 'Property'}|Select-Object -ExpandProperty Name -Unique)
+}
+function SN-InvokeSingleArgMember($obj,[string]$methodName,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
+  if($null -eq $obj -or [string]::IsNullOrWhiteSpace($methodName)){return $null}
+  try{
+    $defs=@((SN-AllMemberDefinitions $obj)|Where-Object {$_.Name -eq $methodName})
+    foreach($d in $defs){
+      $def=[string]$d.Definition
+      if($def -notmatch '\\(([^)]*)\\)'){continue}
+      $inside=$Matches[1].Trim()
+      if($inside -match ','){continue}
+      if($inside -and $inside -notmatch '(?i)optional|paramarray'){ }
+      try{
+        $result=$obj.GetType().InvokeMember($methodName,[Reflection.BindingFlags]::InvokeMethod,$null,$obj,@($value))
+        if($expectedText -ne ''){
+          if($result -ne $null -and ([string]$result).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $methodName}
+          try{
+            $back=$obj.GetType().InvokeMember($methodName,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())
+            if(([string]$back).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $methodName}
+          }catch{}
+        }elseif(-not [double]::IsNaN($expectedNumber)){
+          try{if(([double]$result) -eq $expectedNumber){return $methodName}}catch{}
+        }elseif($expectedInt -ne -2147483648){
+          try{if((SN-Scalar-Int $result -default -2147483648) -eq $expectedInt){return $methodName}}catch{}
+        }else{return $methodName}
+      }catch{}
+    }
+  }catch{}
+  return $null
+}
 function SN-Try-SetImportSetting($settings,[string[]]$aliases,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
   if($null -eq $settings){return $null}
-  foreach($prop in @(SN-ComPropertyNames $settings)){
+  # 1) Standard writable/parameterized properties.
+  foreach($prop in @(SN-ComPropertyNamesAll $settings)){
     if(-not (SN-FieldNameMatches -name $prop -aliases $aliases)){continue}
     try{
       $settings.$prop=$value
-      if($expectedText -ne ''){
-        if(([string]$settings.$prop).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $prop}
-      }elseif(-not [double]::IsNaN($expectedNumber)){
-        $n=SN-Scalar-Number -value $settings.$prop -default ([double]::NaN)
-        if(-not [double]::IsNaN([double]$n) -and [double]$n -eq $expectedNumber){return $prop}
-      }elseif($expectedInt -ne -2147483648){
-        $n=SN-Scalar-Int -value $settings.$prop -default -2147483648
-        if($n -eq $expectedInt){return $prop}
-      }else{return $prop}
+      if($expectedText -ne '' -and ([string]$settings.$prop).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $prop}
+      if(-not [double]::IsNaN($expectedNumber) -and (SN-Scalar-Number $settings.$prop -default ([double]::NaN)) -eq $expectedNumber){return $prop}
+      if($expectedInt -ne -2147483648 -and (SN-Scalar-Int $settings.$prop -default -2147483648) -eq $expectedInt){return $prop}
     }catch{}
     try{
       $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::SetProperty,$null,$settings,@($value))|Out-Null
@@ -518,13 +518,40 @@ function SN-Try-SetImportSetting($settings,[string[]]$aliases,$value,[string]$ex
         $back=[string]$settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@())
         if($back.Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $prop}
       }elseif(-not [double]::IsNaN($expectedNumber)){
-        $back=SN-Scalar-Number -value $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@()) -default ([double]::NaN)
-        if(-not [double]::IsNaN([double]$back) -and [double]$back -eq $expectedNumber){return $prop}
+        $back=SN-Scalar-Number $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@()) -default ([double]::NaN)
+        if(-not [double]::IsNaN($back) -and $back -eq $expectedNumber){return $prop}
       }elseif($expectedInt -ne -2147483648){
-        $back=SN-Scalar-Int -value $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@()) -default -2147483648
+        $back=SN-Scalar-Int $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@()) -default -2147483648
         if($back -eq $expectedInt){return $prop}
-      }else{return $prop}
+      }
     }catch{}
+  }
+
+  # 2) Setter-style methods such as SetMaterial / SetThickness / SetQuantity.
+  foreach($method in @(SN-AllMemberDefinitions $settings | Where-Object {$_.Type -eq 'Method'} | Select-Object -ExpandProperty Name -Unique)){
+    $norm=SN-NormalizeFieldName $method
+    foreach($alias in @($aliases)){
+      $an=SN-NormalizeFieldName $alias
+      if($norm -eq $an -or $norm -eq ('SET'+$an) -or $norm -eq ('SET'+$an+'VALUE') -or $norm -eq ('SET'+$an+'NAME')){
+        $hit=SN-InvokeSingleArgMember -obj $settings -methodName $method -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
+        if($hit){return ('METHOD.'+$hit)}
+      }
+    }
+  }
+
+  # 3) Generic field/value methods used by COM import-mapping objects.
+  foreach($method in @('SetValue','SetField','SetParameter','SetProperty','SetImportValue','SetOption')){
+    $defs=@((SN-AllMemberDefinitions $settings)|Where-Object {$_.Name -eq $method -and $_.Type -eq 'Method'})
+    foreach($d in $defs){
+      try{
+        if(([string]$d.Definition) -match '\\([^)]*\\)' -and [string]$d.Definition -notmatch ','){
+          $r=$settings.GetType().InvokeMember($method,[Reflection.BindingFlags]::InvokeMethod,$null,$settings,@($value))
+          if($expectedText -ne '' -and $r -ne $null -and ([string]$r).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return ('GENERIC.'+$method)}
+          if($expectedInt -ne -2147483648 -and (SN-Scalar-Int $r -default -2147483648) -eq $expectedInt){return ('GENERIC.'+$method)}
+          if(-not [double]::IsNaN($expectedNumber) -and (SN-Scalar-Number $r -default ([double]::NaN)) -eq $expectedNumber){return ('GENERIC.'+$method)}
+        }
+      }catch{}
+    }
   }
   return $null
 }
@@ -544,6 +571,27 @@ function SN-Get-ImportSettings($adapter){
     }catch{}
   }
   return $null
+}
+function SN-Get-ImportDiagnostics($adapter,$settings){
+  $parts=@()
+  if($null -ne $adapter){
+    $parts+='Adapter methods/properties:'
+    foreach($d in @(SN-AllMemberDefinitions $adapter)){$parts+=('  '+$d.Name+' :: '+$d.Definition)}
+  }
+  if($null -ne $settings){
+    $parts+='PartImportSettings methods/properties:'
+    foreach($d in @(SN-AllMemberDefinitions $settings)){$parts+=('  '+$d.Name+' :: '+$d.Definition)}
+    foreach($prop in @(SN-ComPropertyNamesAll $settings)){
+      try{
+        $child=$settings.$prop
+        if($null -eq $child -or $child -is [string] -or $child -is [ValueType]){continue}
+        if($child -is [System.Array] -and $child.Count -gt 1){continue}
+        $parts+=('  Nested '+$prop+':')
+        foreach($d in @(SN-AllMemberDefinitions $child)){$parts+=('    '+$d.Name+' :: '+$d.Definition)}
+      }catch{}
+    }
+  }
+  return @($parts)
 }
 function SN-Configure-PRS-ImportSettings($settings,$clData){
   $material=[string]$clData.sigmaMaterial
@@ -566,6 +614,7 @@ function SN-Configure-PRS-ImportSettings($settings,$clData){
 function SN-Try-ImportPRS-WithSettings($app,[string]$sourcePath,$clData){
   $before=SN-Parts-Count $app
   $adapter=$null
+  $info=$null
   $diagnostics=@()
   try{$adapter=New-Object -ComObject SigmaNEST.SNPartExportImport -ErrorAction Stop}catch{
     $diagnostics+='SNPartExportImport unavailable: '+(SN-ErrorText $_)
@@ -616,6 +665,9 @@ function SN-Try-ImportPRS-WithSettings($app,[string]$sourcePath,$clData){
     try{$diagnostics+='Adapter properties: '+((SN-ComPropertyNames $adapter) -join ', ')}catch{}
   }
   try{if($adapter){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($adapter)}}catch{}
+  if($null -ne $adapter -and $null -ne $info -and $null -ne $info.settings){
+    $diagnostics += @(SN-Get-ImportDiagnostics -adapter $adapter -settings $info.settings)
+  }
   return [pscustomobject]@{ok=$false;diagnostics=$diagnostics}
 }
 function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=$null){
