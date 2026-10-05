@@ -414,7 +414,7 @@ async function waitForBuild(jobId,job,selectedNames){
     finalResult.parts=s.parts||finalResult.parts||[];
     finalResult.outputDir=s.outputDir||finalResult.outputDir||'';
     finalResult.wsPath=finalResult.wsPath||s.wsPath||'';
-    finalResult.importedCount=finalResult.importedCount!=null?finalResult.importedCount:(s.importedCount!=null?s.importedCount:0);
+    finalResult.importedCount=finalResult.importedCount!=null?finalResult.importedCount:(s.importedCount!=null?s.importedCount:(finalResult.partCount!=null?finalResult.partCount:0));
     finalResult.missingCount=finalResult.missingCount!=null?finalResult.missingCount:(s.missingCount!=null?s.missingCount:0);
     finalResult.reviewCount=finalResult.reviewCount!=null?finalResult.reviewCount:(s.reviewCount!=null?s.reviewCount:0);
     finalResult.reviewBreakdown=finalResult.reviewBreakdown||s.reviewBreakdown||{};
