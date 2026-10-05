@@ -47,12 +47,12 @@ function SN-Add-Geometry($app,[string]$sourcePath,[string]$sourceType){
     # Verified SigmaNEST X1.4 interface: SNApp.LoadPart(string).
     # Do not use Type.InvokeMember here; it binds the COM method incorrectly
     # on this installation and reports a parameter-count mismatch.
-    $loaded=$app.LoadPart([string]$sourcePath)
-    if([bool]$loaded){
-      try{$app.CreatePartsListForNewPartsInWS()}catch{}
+    [void]$app.LoadPart([string]$sourcePath)
+    try{$app.CreatePartsListForNewPartsInWS()}catch{}
+    if((SN-Parts-Count $app) -gt $before){
       return SN-Get-NewPart $app $before $label
     }
-    $errors+='LoadPart returned False'
+    $errors+='LoadPart did not add a part to PartsList'
   }catch{$errors+=('LoadPart: '+$_.Exception.Message)}
   if($sourceType -eq 'DXF'){
     try{
