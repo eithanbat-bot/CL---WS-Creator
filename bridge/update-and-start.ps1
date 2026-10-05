@@ -118,17 +118,18 @@ try{
   $entries=@($runtimeFiles|ForEach-Object{
     [pscustomobject]@{
       relative=$_.Name
-      stage=$_.FullName
+      source=$_.FullName
     }
   })
 
   foreach($entry in $entries){
-    $stage=Join-Path $tmpRoot ('stage-'+$entry.relative)
-    Copy-Item -LiteralPath $entry.stage -Destination $stage -Force
+    $validationStage=Join-Path $tmpRoot ('validate-'+$entry.relative)
+    Copy-Item -LiteralPath $entry.source -Destination $validationStage -Force
     $ext=[IO.Path]::GetExtension($entry.relative).ToLowerInvariant()
     Say "Verifying bridge\\$($entry.relative)..."
-    if($ext -eq '.ps1' -and -not(Test-Syntax $stage)){throw "Downloaded $($entry.relative) failed PowerShell syntax validation."}
-    $entry.stage=$stage
+    if(-not(Test-Path -LiteralPath $validationStage)){throw "Downloaded bridge file did not materialize for validation: $($entry.relative)"}
+    if($ext -eq '.ps1' -and -not(Test-Syntax $validationStage)){throw "Downloaded $($entry.relative) failed PowerShell syntax validation."}
+    if($ext -eq '.xml' -and -not(Test-Xml $validationStage)){throw "Downloaded $($entry.relative) failed XML validation."}
   }
 
   $remoteServer=Join-Path $tmpRoot 'stage-server.ps1'
@@ -142,7 +143,7 @@ try{
     $local=Join-Path $BridgeDir $entry.relative
     $stage=[string]$entry.stage
     if((Get-Hash $stage) -ne (Get-Hash $local)){
-      $install+=[pscustomobject]@{Stage=$stage;Local=$local;Relative=$entry.relative}
+      $install+=[pscustomobject]@{Stage=[string]$entry.source;Local=$local;Relative=$entry.relative}
     }
   }
 
@@ -185,6 +186,7 @@ try{
         }else{$newFiles+=$item.Local}
       }
       foreach($item in $changed){
+        if(-not(Test-Path -LiteralPath $item.Stage)){throw "Downloaded archive source is missing before install: $($item.Relative)"}
         Copy-Item -LiteralPath $item.Stage -Destination $item.Local -Force
       }
 
@@ -194,6 +196,8 @@ try{
         if([IO.Path]::GetFileName($item.Local) -eq 'manifest.xml' -and -not(Test-Xml $item.Local)){throw 'Installed manifest.xml failed XML validation.'}
       }
       Say ('Updated: '+(($changed|ForEach-Object{$_.Relative})-join ', ')) 'Green'
+      $installedVersion=Get-Version $Server
+      if($installedVersion -ne $remoteVersion){throw "Installed bridge version verification failed. Expected $remoteVersion but found $installedVersion."}
     }catch{
       Say 'Update failed; restoring the previous installed files...' 'Red'
       foreach($item in $backups){Copy-Item -LiteralPath $item.Backup -Destination $item.Local -Force}
