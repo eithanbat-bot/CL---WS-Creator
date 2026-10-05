@@ -135,7 +135,7 @@ jobs:
 
           if(-not $updater.Contains('function Test-Syntax')){throw 'Updater is missing PowerShell syntax validation.'}
           if(-not $updater.Contains('$newFiles')){throw 'Updater rollback does not track newly created runtime files.'}
-          if(-not $updater.Contains('dxf-index\.json') -or -not $updater.Contains('dxf-index-status\.json')){throw 'Updater does not preserve generated DXF index state.'}
+          if(-not $updater.Contains('dxf-index.json') -or -not $updater.Contains('dxf-index-status.json')){throw 'Updater does not preserve generated DXF index state.'}
           if(-not $updater.Contains('https://github.com/$Repo/archive/refs/heads/$Branch.zip')){throw 'Updater does not use the single GitHub repository archive.'}
           if(-not $updater.Contains('Expand-Archive')){throw 'Updater does not extract the repository archive.'}
           if($updater.Contains('$ApiContents=')){throw 'Updater still contains the old per-file GitHub Contents API dependency.'}
