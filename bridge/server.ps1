@@ -1052,7 +1052,6 @@ function Handle-Request($req){
       }
     }finally{
       Remove-Item -LiteralPath $reqFile -Force -ErrorAction SilentlyContinue
-      if($runDir){Remove-Item -LiteralPath $runDir -Recurse -Force -ErrorAction SilentlyContinue}
     }
   }
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
