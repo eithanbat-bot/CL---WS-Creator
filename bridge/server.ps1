@@ -537,13 +537,18 @@ function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[
     # A strong material/thickness winner is safe. A tie or weak lead remains
     # a review case rather than silently selecting the wrong geometry.
     if($top -gt $second -and ($top-$second) -ge 40){return $scored[0].candidate}
-    $ambiguous=@($scored|Select-Object -First 6|ForEach-Object{$_.candidate})
-    return [pscustomobject]@{
-      ambiguous=$ambiguous
-      candidateScores=@($scored|Select-Object -First 6|ForEach-Object{
-        [pscustomobject]@{file=$_.candidate.file;score=$_.score}
-      })
-    }
+    # Keep the best geometry even when the score is tied. The caller will
+    # mark the row REVIEW, but it must still retain sourcePath so SigmaNEST can
+    # import the geometry. The previous implementation returned only an
+    # "ambiguous" wrapper, which deliberately discarded the usable source and
+    # caused "Imported into WS: 0".
+    $selected=$scored[0].candidate
+    Set-Prop $selected 'selectionAmbiguous' $true | Out-Null
+    Set-Prop $selected 'candidateScores' @($scored|Select-Object -First 6|ForEach-Object{
+      [pscustomobject]@{file=$_.candidate.file;score=$_.score}
+    }) | Out-Null
+    Set-Prop $selected 'ambiguousCount' ([int]$scored.Count) | Out-Null
+    return $selected
   }
 
   $dxf=@($c|Where-Object {[string]$_.fileType -eq 'DXF'})
@@ -590,12 +595,53 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
   $vars=@(Deduplicate-Candidates ($prsVars+$dxfVars))
   if($vars.Count){
     $hit=Select-MatchCandidate -candidates $vars -clMat $clMat -clThk $clThk -matchType 'VARIATION'
-    if($hit -and -not($hit.PSObject.Properties.Name -contains 'ambiguous')){
+    if($hit){
       Ensure-Metadata -item $hit | Out-Null
       Set-Prop $hit 'matchType' 'VARIATION' | Out-Null
       return $hit
     }
-    if($hit){return $hit}
+  }
+
+  # Conservative assembly-prefix fallback. This is specifically for the
+  # documented case where the CL and library drawing numbers share the
+  # assembly/initial characters but differ in a trailing letter/digit.
+  $all=@()
+  $all += @($script:INDEX)
+  $all += @($dxf)
+  $all=@(Deduplicate-Candidates $all)
+  $target=Normalize -s $part
+  if($target.Length -ge 6){
+    $fuzzy=@()
+    foreach($candidate in $all){
+      $cn=Normalize -s ([string]$candidate.partName)
+      if($cn.Length -lt 6){continue}
+      $maxPrefix=[math]::Min($target.Length,$cn.Length)
+      $prefix=0
+      while($prefix -lt $maxPrefix -and $target[$prefix] -eq $cn[$prefix]){$prefix++}
+      if($prefix -lt 6){continue}
+      $minLen=[math]::Min($target.Length,$cn.Length)
+      if($prefix -lt [math]::Ceiling($minLen*0.75)){continue}
+      $score=$prefix*10 - [math]::Abs($target.Length-$cn.Length)*3
+      if([string]$candidate.fileType -eq 'PRS'){
+        $score+=20
+        Ensure-Metadata -item $candidate | Out-Null
+        if(Material-Equal -a $clMat -b ([string]$candidate.likelyMaterial) -aThickness $clThk -bThickness ([string]$candidate.thickness)){$score+=40}
+        if((Thickness-Number -s $clThk) -eq (Thickness-Number -s ([string]$candidate.thickness))){$score+=20}
+      }
+      $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
+    }
+    $fuzzy=@($fuzzy|Sort-Object score -Descending)
+    if($fuzzy.Count){
+      $top=$fuzzy[0]
+      $second=if($fuzzy.Count -gt 1){$fuzzy[1]}else{$null}
+      if($null -eq $second -or ([int]$top.score-[int]$second.score) -ge 15){
+        $hit=$top.candidate
+        Set-Prop $hit 'selectionFuzzy' $true | Out-Null
+        Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
+        Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
+        return $hit
+      }
+    }
   }
   $null
 }
@@ -785,18 +831,10 @@ function Handle-Request($req){
         $parts+=$p
         continue
       }
-      if($f.PSObject.Properties.Name -contains 'ambiguous'){
-        Set-Prop $p 'status' 'REVIEW' | Out-Null
-        Set-Prop $p 'statusLabel' ('AMBIGUOUS ('+$f.ambiguous.Count+')') | Out-Null
-        $detail='More than one geometry source matches this part'
-        if($f.candidateScores){
-          $top=@($f.candidateScores|Select-Object -First 3)
-          $detail+=' after material/thickness scoring: '+(($top|ForEach-Object{([IO.Path]::GetFileName([string]$_.file))+', score '+$_.score}) -join ' | ')
-        }
-        Set-Prop $p 'reviewReason' $detail | Out-Null
-        $parts+=$p
-        continue
-      }
+      # Ambiguity is now metadata on a real selected geometry candidate.
+      # Do not discard the source: reviewed parts must still be importable.
+      $selectionAmbiguous=[bool]$(if($f.selectionAmbiguous){$f.selectionAmbiguous}else{$false})
+      $selectionFuzzy=[bool]$(if($f.selectionFuzzy){$f.selectionFuzzy}else{$false})
 
       $sourceType=[string]$f.fileType
       $libMat=[string]$f.likelyMaterial
@@ -814,7 +852,16 @@ function Handle-Request($req){
       $variation=([string]$f.matchType -eq 'VARIATION')
 
       $reviewReason=''
-      if([bool]$p.clReview){
+      if($selectionAmbiguous){
+        $status='REVIEW'
+        $label='AMBIGUOUS ('+[int]$f.ambiguousCount+')'
+        $scores=@($f.candidateScores|Select-Object -First 3)
+        $reviewReason='Multiple geometry candidates matched; best candidate selected for import. '+(($scores|ForEach-Object{[IO.Path]::GetFileName([string]$_.file)+' score '+$_.score}) -join ' | ')
+      }elseif($selectionFuzzy){
+        $status='REVIEW'
+        $label='FUZZY MATCH - REVIEW'
+        $reviewReason='Geometry selected by conservative assembly-prefix matching; confirm the drawing before production.'
+      }elseif([bool]$p.clReview){
         $status='REVIEW'
         $label=[string]$p.clReviewReason
         $reviewReason=[string]$(if($p.clReviewDetail){$p.clReviewDetail}else{'Conflicting CL values were kept separate and require confirmation'})
