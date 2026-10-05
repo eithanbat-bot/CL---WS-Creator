@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.9.2'
+$BRIDGE_VERSION = '2.9.3'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -375,7 +375,15 @@ function Get-GeometryFiles([string]$root,[string]$extension,[System.Collections.
 
 function Scan-Libraries([string]$prsRoot,[string]$dxfRoot){
   $scanErrors=New-Object System.Collections.ArrayList
-  $prsFiles=@(Get-GeometryFiles -root $prsRoot -extension '.prs' -errors $scanErrors)
+  # Never treat our own generated job/staging directory as part of the PRS
+  # library. It lives under PARTS for convenience, but its copies are not
+  # source geometry and can otherwise create self-copy errors on later builds.
+  $prsFiles=@(Get-GeometryFiles -root $prsRoot -extension '.prs' -errors $scanErrors |
+    Where-Object {
+      $full=[IO.Path]::GetFullPath([string]$_)
+      $stagingRoot=[IO.Path]::GetFullPath((Join-Path -Path $prsRoot -ChildPath '_CL_WS_BUILDER'))
+      -not $full.StartsWith(($stagingRoot.TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase)
+    })
   $dxfStatus=Get-DxfStatus
 
   $items=@()
@@ -655,8 +663,14 @@ function Write-Job([string]$root,[string]$name,$parts){
   New-Item -ItemType Directory -Path $partsDir -Force|Out-Null
 
   foreach($p in @($parts|Where-Object {$_.sourcePath})){
-    $dest=Join-Path -Path $partsDir -ChildPath ([IO.Path]::GetFileName([string]$p.sourcePath))
-    Copy-Item -LiteralPath ([string]$p.sourcePath) -Destination $dest -Force
+    $source=[IO.Path]::GetFullPath([string]$p.sourcePath)
+    $dest=Join-Path -Path $partsDir -ChildPath ([IO.Path]::GetFileName($source))
+    $dest=[IO.Path]::GetFullPath($dest)
+    # A prior generated job may already be the selected source (for example
+    # before the server has been restarted with the staging-directory filter).
+    # Do not ask Copy-Item to overwrite a file with itself.
+    if($source.Equals($dest,[StringComparison]::OrdinalIgnoreCase)){continue}
+    Copy-Item -LiteralPath $source -Destination $dest -Force
   }
 
   $rows=@('Part,Qty,Material,Thickness,SourceType,SourceFile,MatchType,PRS_Material,PRS_Thickness,SourcePath,Status,ReviewReason')
