@@ -488,7 +488,7 @@ async function build(){
 
     var r=await bridge('/api/build-job',{
       method:'POST',
-      timeoutMs:15000,
+      timeoutMs:30000,
       body:JSON.stringify({
         prsRoot:prsRoot,
         dxfRoot:dxfRoot,
