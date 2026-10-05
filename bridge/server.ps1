@@ -989,6 +989,9 @@ function Handle-Request($req){
       $localWorker=Join-Path $runDir 'create-sigmanest-ws.ps1'
       $localRequest=Join-Path $runDir 'request.json'
       $localResult=Join-Path $runDir 'result.json'
+      $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
+      $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
+      $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
       Copy-Item -LiteralPath $worker -Destination $localWorker -Force
       Copy-Item -LiteralPath $reqFile -Destination $localRequest -Force
 
@@ -1017,9 +1020,6 @@ function Handle-Request($req){
 
       # Run the SigmaNEST creator as a real child process so its exit code,
       # stdout and stderr are preserved even when COM initialization crashes.
-      $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
-      $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
-      $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
       $psi=New-Object System.Diagnostics.ProcessStartInfo
       $psi.FileName=Get-PowerShellExe
       $psi.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "'+$localWorker+'" -RequestFile "'+$localRequest+'" -ResultFile "'+$localResult+'"'
