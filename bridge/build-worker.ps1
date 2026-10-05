@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.11.3'
+$WorkerVersion='2.11.4'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
@@ -120,7 +120,8 @@ try{
     exit 0
   }
 
-  $request.engineRequest=$prepared.engineRequest
+  $engineRequest=$prepared.engineRequest
+  if($null -eq $engineRequest){throw 'Background build preparation returned no SigmaNEST engine request.'}
   $phase='COM_BUILD'
   Write-BuildStatus $statusFile ([ordered]@{
     jobId=[string]$request.jobId
@@ -136,7 +137,7 @@ try{
     parts=@($request.reportParts)
   })
 
-  $data=Invoke-SigmaNestBuild -Request $request.engineRequest
+  $data=Invoke-SigmaNestBuild -Request $engineRequest
   $finished=(Get-Date).ToUniversalTime()
   if($null -eq $data){throw 'SigmaNEST background COM engine returned no result.'}
 
