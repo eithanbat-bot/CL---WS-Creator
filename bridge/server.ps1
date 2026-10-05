@@ -175,7 +175,8 @@ function Sigma-Material([string]$cl,[string]$lib,[string]$thickness=''){
   $source=[string]$(if(-not [string]::IsNullOrWhiteSpace([string]$cl)){$cl}else{$lib})
   $s=Normalize-Material -s $source
   $s=$s -replace '^\d+(?:\.\d+)?\s*mm\s*',''
-  $s=$s -replace '\s+(sheet|plate)(){
+  $s=$s -replace '\s+(sheet|plate)
+function Get-DxfStatus(){
   if(-not(Test-Path -LiteralPath $DXF_STATUS_FILE)){return [pscustomobject]@{state='IDLE';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='DXF index has not been started.'}}
   try{return (Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json)}catch{return [pscustomobject]@{state='UNKNOWN';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='Could not read DXF index status.'}}
 }
@@ -637,28 +638,19 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
         if(Material-Equal -a $clMat -b ([string]$candidate.likelyMaterial) -aThickness $clThk -bThickness ([string]$candidate.thickness)){$score+=40}
         if((Thickness-Number -s $clThk) -eq (Thickness-Number -s ([string]$candidate.thickness))){$score+=20}
       }
-      $fuzzy += [pscustomobject]@{candidate=$candidate;score=[int]$score;prefix=[int]$prefix}
+      $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
     }
-    $fuzzy=@($fuzzy|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[string]$_.candidate.file};Descending=$false})
+    $fuzzy=@($fuzzy|Sort-Object score -Descending)
     if($fuzzy.Count){
       $top=$fuzzy[0]
-      $alternatives=@($fuzzy|Select-Object -First 8|ForEach-Object{
-        [pscustomobject]@{file=[string]$_.candidate.file;score=[int]$_.score;fileType=[string]$_.candidate.fileType}
-      })
-      $hit=$top.candidate
-      Set-Prop $hit 'selectionDecision' 'BEST CANDIDATE' | Out-Null
-      Set-Prop $hit 'candidateScore' ([int]$top.score) | Out-Null
-      if($fuzzy.Count -gt 1){
-        Set-Prop $hit 'candidateAlternatives' $alternatives | Out-Null
-        $second=$fuzzy[1]
-        if(([int]$top.score-[int]$second.score) -lt 15){
-          Set-Prop $hit 'selectionFuzzy' $true | Out-Null
-          Set-Prop $hit 'ambiguousCount' ([int]$fuzzy.Count) | Out-Null
-        }
+      $second=if($fuzzy.Count -gt 1){$fuzzy[1]}else{$null}
+      if($null -eq $second -or ([int]$top.score-[int]$second.score) -ge 15){
+        $hit=$top.candidate
+        Set-Prop $hit 'selectionFuzzy' $true | Out-Null
+        Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
+        Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
+        return $hit
       }
-      Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
-      Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
-      return $hit
     }
   }
   $null
@@ -960,19 +952,19 @@ function Prepare-SigmaNestBuild($b){
       }elseif($sourceType -eq 'DXF'){
         $status='READY'
         $label='FOUND - DXF'
-       }elseif($matKnown -and -not $mok -and $thkKnown -and -not $tok){
-         $status='READY'
-         $label='CL OVERRIDE - MATERIAL + THICKNESS'
-         $reviewReason='PRS metadata conflicts with CL; imported workspace part will be overwritten with CL material and thickness.'
-       }elseif($matKnown -and -not $mok){
-         $status='READY'
-         $label='CL OVERRIDE - MATERIAL'
-         $reviewReason='PRS material conflicts with CL; imported workspace part will be overwritten with CL material.'
-       }elseif($thkKnown -and -not $tok){
-         $status='READY'
-         $label='CL OVERRIDE - THICKNESS'
-         $reviewReason='PRS thickness conflicts with CL; imported workspace part will be overwritten with CL thickness.'
-       }else{
+      }elseif($matKnown -and -not $mok -and $thkKnown -and -not $tok){
+        $status='READY'
+        $label='CL OVERRIDE - MATERIAL + THICKNESS'
+        $reviewReason='PRS metadata conflicts with CL; imported workspace part will be overwritten with CL material and thickness.'
+      }elseif($matKnown -and -not $mok){
+        $status='READY'
+        $label='CL OVERRIDE - MATERIAL'
+        $reviewReason='PRS material conflicts with CL; imported workspace part will be overwritten with CL material.'
+      }elseif($thkKnown -and -not $tok){
+        $status='READY'
+        $label='CL OVERRIDE - THICKNESS'
+        $reviewReason='PRS thickness conflicts with CL; imported workspace part will be overwritten with CL thickness.'
+      }else{
         $status='READY'
         $label=if($matKnown -and $thkKnown){'FOUND - PRS'}else{'FOUND - PRS USING CL DATA'}
       }
@@ -988,9 +980,9 @@ function Prepare-SigmaNestBuild($b){
       Set-Prop -obj $p -name 'matchType' -value $f.matchType | Out-Null
       Set-Prop $p 'libraryMaterial' $libMat | Out-Null
       Set-Prop $p 'libraryThickness' $libThk | Out-Null
-       Set-Prop $p 'materialOverride' ([bool]($matKnown -and $clMatKnown -and -not $mok)) | Out-Null
-       Set-Prop $p 'thicknessOverride' ([bool]($thkKnown -and $clThkKnown -and -not $tok)) | Out-Null
-       Set-Prop $p 'quantityOverride' $true | Out-Null
+      Set-Prop $p 'materialOverride' ([bool]($matKnown -and $clMatKnown -and -not $mok)) | Out-Null
+      Set-Prop $p 'thicknessOverride' ([bool]($thkKnown -and $clThkKnown -and -not $tok)) | Out-Null
+      Set-Prop $p 'quantityOverride' $true | Out-Null
       $parts+=$p
     }
     $review=@($parts|Where-Object {$_.status -ne 'READY'})
@@ -1199,7 +1191,8 @@ if(-not $LibraryOnly){
 }
 ,''
   $th=Thickness-Number -s $thickness
-  if($s -match '(?i)^Armox(){
+  if($s -match '(?i)^Armox
+function Get-DxfStatus(){
   if(-not(Test-Path -LiteralPath $DXF_STATUS_FILE)){return [pscustomobject]@{state='IDLE';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='DXF index has not been started.'}}
   try{return (Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json)}catch{return [pscustomobject]@{state='UNKNOWN';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='Could not read DXF index status.'}}
 }
@@ -1661,28 +1654,19 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
         if(Material-Equal -a $clMat -b ([string]$candidate.likelyMaterial) -aThickness $clThk -bThickness ([string]$candidate.thickness)){$score+=40}
         if((Thickness-Number -s $clThk) -eq (Thickness-Number -s ([string]$candidate.thickness))){$score+=20}
       }
-      $fuzzy += [pscustomobject]@{candidate=$candidate;score=[int]$score;prefix=[int]$prefix}
+      $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
     }
-    $fuzzy=@($fuzzy|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[string]$_.candidate.file};Descending=$false})
+    $fuzzy=@($fuzzy|Sort-Object score -Descending)
     if($fuzzy.Count){
       $top=$fuzzy[0]
-      $alternatives=@($fuzzy|Select-Object -First 8|ForEach-Object{
-        [pscustomobject]@{file=[string]$_.candidate.file;score=[int]$_.score;fileType=[string]$_.candidate.fileType}
-      })
-      $hit=$top.candidate
-      Set-Prop $hit 'selectionDecision' 'BEST CANDIDATE' | Out-Null
-      Set-Prop $hit 'candidateScore' ([int]$top.score) | Out-Null
-      if($fuzzy.Count -gt 1){
-        Set-Prop $hit 'candidateAlternatives' $alternatives | Out-Null
-        $second=$fuzzy[1]
-        if(([int]$top.score-[int]$second.score) -lt 15){
-          Set-Prop $hit 'selectionFuzzy' $true | Out-Null
-          Set-Prop $hit 'ambiguousCount' ([int]$fuzzy.Count) | Out-Null
-        }
+      $second=if($fuzzy.Count -gt 1){$fuzzy[1]}else{$null}
+      if($null -eq $second -or ([int]$top.score-[int]$second.score) -ge 15){
+        $hit=$top.candidate
+        Set-Prop $hit 'selectionFuzzy' $true | Out-Null
+        Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
+        Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
+        return $hit
       }
-      Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
-      Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
-      return $hit
     }
   }
   $null
@@ -2215,7 +2199,8 @@ if(-not $LibraryOnly){
   
 }
  -and $th -eq 4){return 'Ramor 500'}
-  if($s -match '(?i)^Armox\s+4mm(){
+  if($s -match '(?i)^Armox\s+4mm
+function Get-DxfStatus(){
   if(-not(Test-Path -LiteralPath $DXF_STATUS_FILE)){return [pscustomobject]@{state='IDLE';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='DXF index has not been started.'}}
   try{return (Get-Content -LiteralPath $DXF_STATUS_FILE -Raw -Encoding UTF8|ConvertFrom-Json)}catch{return [pscustomobject]@{state='UNKNOWN';root=$DEFAULT_DXF_LIBRARY;filesFound=0;errors=0;message='Could not read DXF index status.'}}
 }
@@ -2677,28 +2662,19 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
         if(Material-Equal -a $clMat -b ([string]$candidate.likelyMaterial) -aThickness $clThk -bThickness ([string]$candidate.thickness)){$score+=40}
         if((Thickness-Number -s $clThk) -eq (Thickness-Number -s ([string]$candidate.thickness))){$score+=20}
       }
-      $fuzzy += [pscustomobject]@{candidate=$candidate;score=[int]$score;prefix=[int]$prefix}
+      $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
     }
-    $fuzzy=@($fuzzy|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[string]$_.candidate.file};Descending=$false})
+    $fuzzy=@($fuzzy|Sort-Object score -Descending)
     if($fuzzy.Count){
       $top=$fuzzy[0]
-      $alternatives=@($fuzzy|Select-Object -First 8|ForEach-Object{
-        [pscustomobject]@{file=[string]$_.candidate.file;score=[int]$_.score;fileType=[string]$_.candidate.fileType}
-      })
-      $hit=$top.candidate
-      Set-Prop $hit 'selectionDecision' 'BEST CANDIDATE' | Out-Null
-      Set-Prop $hit 'candidateScore' ([int]$top.score) | Out-Null
-      if($fuzzy.Count -gt 1){
-        Set-Prop $hit 'candidateAlternatives' $alternatives | Out-Null
-        $second=$fuzzy[1]
-        if(([int]$top.score-[int]$second.score) -lt 15){
-          Set-Prop $hit 'selectionFuzzy' $true | Out-Null
-          Set-Prop $hit 'ambiguousCount' ([int]$fuzzy.Count) | Out-Null
-        }
+      $second=if($fuzzy.Count -gt 1){$fuzzy[1]}else{$null}
+      if($null -eq $second -or ([int]$top.score-[int]$second.score) -ge 15){
+        $hit=$top.candidate
+        Set-Prop $hit 'selectionFuzzy' $true | Out-Null
+        Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
+        Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
+        return $hit
       }
-      Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
-      Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
-      return $hit
     }
   }
   $null
@@ -3695,28 +3671,19 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
         if(Material-Equal -a $clMat -b ([string]$candidate.likelyMaterial) -aThickness $clThk -bThickness ([string]$candidate.thickness)){$score+=40}
         if((Thickness-Number -s $clThk) -eq (Thickness-Number -s ([string]$candidate.thickness))){$score+=20}
       }
-      $fuzzy += [pscustomobject]@{candidate=$candidate;score=[int]$score;prefix=[int]$prefix}
+      $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
     }
-    $fuzzy=@($fuzzy|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[string]$_.candidate.file};Descending=$false})
+    $fuzzy=@($fuzzy|Sort-Object score -Descending)
     if($fuzzy.Count){
       $top=$fuzzy[0]
-      $alternatives=@($fuzzy|Select-Object -First 8|ForEach-Object{
-        [pscustomobject]@{file=[string]$_.candidate.file;score=[int]$_.score;fileType=[string]$_.candidate.fileType}
-      })
-      $hit=$top.candidate
-      Set-Prop $hit 'selectionDecision' 'BEST CANDIDATE' | Out-Null
-      Set-Prop $hit 'candidateScore' ([int]$top.score) | Out-Null
-      if($fuzzy.Count -gt 1){
-        Set-Prop $hit 'candidateAlternatives' $alternatives | Out-Null
-        $second=$fuzzy[1]
-        if(([int]$top.score-[int]$second.score) -lt 15){
-          Set-Prop $hit 'selectionFuzzy' $true | Out-Null
-          Set-Prop $hit 'ambiguousCount' ([int]$fuzzy.Count) | Out-Null
-        }
+      $second=if($fuzzy.Count -gt 1){$fuzzy[1]}else{$null}
+      if($null -eq $second -or ([int]$top.score-[int]$second.score) -ge 15){
+        $hit=$top.candidate
+        Set-Prop $hit 'selectionFuzzy' $true | Out-Null
+        Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
+        Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
+        return $hit
       }
-      Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
-      Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
-      return $hit
     }
   }
   $null
