@@ -376,24 +376,82 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
 }
 function SN-Read-PartField($partObj,[string[]]$aliases,[string]$expectedText='',$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
   if($null -eq $partObj){return $null}
-  foreach($prop in @(SN-ComPropertyNames $partObj)){
-    if(-not (SN-FieldNameMatches -name $prop -aliases $aliases)){continue}
-    try{
-      $v=$partObj.$prop
-      if($expectedText -ne ''){
-        if(([string]$v).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return [pscustomobject]@{path=$prop;value=[string]$v}}
-      }elseif(-not [double]::IsNaN($expectedNumber)){
-        $n=SN-Scalar-Number -value $v -default ([double]::NaN)
-        if(-not [double]::IsNaN([double]$n) -and [double]$n -eq $expectedNumber){return [pscustomobject]@{path=$prop;value=$n}}
-      }elseif($expectedInt -ne -2147483648){
-        $n=SN-Scalar-Int -value $v -default -2147483648
-        if($n -eq $expectedInt){return [pscustomobject]@{path=$prop;value=$n}}
-      }else{
-        return [pscustomobject]@{path=$prop;value=$v}
-      }
-    }catch{}
+  $visited=@{}
+  $queue=New-Object System.Collections.Queue
+  $queue.Enqueue([pscustomobject]@{object=$partObj;path='ROOT';depth=0})
+  while($queue.Count -gt 0){
+    $node=$queue.Dequeue()
+    $obj=$node.object;$depth=[int]$node.depth
+    if($null -eq $obj -or $depth -gt 4){continue}
+    $identity=''
+    try{$identity=[string][Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($obj)}catch{}
+    if($identity -and $visited.ContainsKey($identity)){continue}
+    if($identity){$visited[$identity]=$true}
+
+    foreach($prop in @(SN-ComPropertyNames $obj)){
+      if(-not (SN-FieldNameMatches -name $prop -aliases $aliases)){continue}
+      try{
+        $v=$obj.$prop
+        if($expectedText -ne ''){
+          if(([string]$v).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){
+            return [pscustomobject]@{path=($node.path+'.'+$prop);value=[string]$v}
+          }
+        }elseif(-not [double]::IsNaN($expectedNumber)){
+          $n=SN-Scalar-Number -value $v -default ([double]::NaN)
+          if(-not [double]::IsNaN([double]$n) -and [double]$n -eq $expectedNumber){
+            return [pscustomobject]@{path=($node.path+'.'+$prop);value=$n}
+          }
+        }elseif($expectedInt -ne -2147483648){
+          $n=SN-Scalar-Int -value $v -default -2147483648
+          if($n -eq $expectedInt){
+            return [pscustomobject]@{path=($node.path+'.'+$prop);value=$n}
+          }
+        }else{
+          return [pscustomobject]@{path=($node.path+'.'+$prop);value=$v}
+        }
+      }catch{}
+    }
+
+    if($depth -ge 4){continue}
+    foreach($prop in @(SN-ComPropertyNames $obj)){
+      if($prop -in @('OwnerList','ParentObject','Parent','Application','Owner','Geometry','PartPolyLinesList','Count','Item','Items')){continue}
+      try{
+        $child=$obj.$prop
+        if($null -eq $child -or $child -is [string] -or $child -is [ValueType]){continue}
+        if($child -is [System.Array]){
+          if($child.Count -eq 1){$child=$child[0]}else{continue}
+        }
+        $queue.Enqueue([pscustomobject]@{object=$child;path=($node.path+'.'+$prop);depth=$depth+1})
+      }catch{}
+    }
   }
   return $null
+}
+function SN-Verify-WorkspaceCLData($app,$requestParts){
+  foreach($rp in @($requestParts)){
+    $target=[string]$rp.part
+    $source=[string]$rp.sourcePath
+    $found=SN-Find-WorkspacePartExact -app $app -targetName $target -sourcePath $source -usedIndices @()
+    if($null -eq $found){throw ('Post-save verification could not find SigmaNEST part "'+$target+'".')}
+    if(-not (SN-Verify-PartIdentity -partObj $found.part -targetName $target -sourcePath $source)){
+      throw ('Post-save verification identity failed for "'+$target+'".')
+    }
+    $material=[string]$rp.sigmaMaterial
+    if(-not [string]::IsNullOrWhiteSpace($material)){
+      $m=SN-Read-PartField -partObj $found.part -aliases @('Material','MaterialName','Mat','MatName','MaterialType') -expectedText $material
+      if($null -eq $m){throw ('Post-save verification failed for "'+$target+'": material is not "'+$material+'".')}
+    }
+    $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
+    if(-not [double]::IsNaN($thickness)){
+      $t=SN-Read-PartField -partObj $found.part -aliases @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -expectedNumber $thickness
+      if($null -eq $t){throw ('Post-save verification failed for "'+$target+'": thickness is not '+$thickness+'mm.')}
+    }
+    $qty=SN-Scalar-Int -value $rp.qty -default 1
+    if($qty -lt 1){$qty=1}
+    $q=SN-Read-PartField -partObj $found.part -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
+    if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
+  }
+  return $true
 }
 function SN-Verify-WorkspaceCLData($app,$requestParts){
   foreach($rp in @($requestParts)){
