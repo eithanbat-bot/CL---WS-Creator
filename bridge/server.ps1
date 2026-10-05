@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.11.1'
+$BRIDGE_VERSION = '2.10.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -772,7 +772,6 @@ function Invoke-DxfScheduler(){
   }catch{}
 }
 
-
 function Write-BuildStatus($statusFile,$obj){
   $dir=Split-Path -Parent $statusFile
   New-Item -ItemType Directory -Path $dir -Force|Out-Null
@@ -783,7 +782,78 @@ function Write-BuildStatus($statusFile,$obj){
 
 function Get-BuildStatusPath([string]$jobId){
   if([string]::IsNullOrWhiteSpace($jobId)){throw 'Build job ID is required.'}
-  if($jobId -notmatch '^[0-9a-fA-F-]{36}
+  if($jobId -notmatch '^[0-9a-fA-F-]{36}$'){throw 'Invalid build job ID.'}
+  $dir=Join-Path $BridgeDir 'build-status'
+  $path=Join-Path $dir ($jobId+'.json')
+  $full=[IO.Path]::GetFullPath($path)
+  $rootFull=[IO.Path]::GetFullPath($dir)
+  if(-not $full.StartsWith(($rootFull.TrimEnd('')+''),[StringComparison]::OrdinalIgnoreCase)){throw 'Invalid build status path.'}
+  return $full
+}
+
+function Start-SigmaNestBuildWorker($request){
+  $statusDir=Join-Path $BridgeDir 'build-status'
+  New-Item -ItemType Directory -Path $statusDir -Force|Out-Null
+  $jobId=[Guid]::NewGuid().ToString()
+  $statusFile=Get-BuildStatusPath -jobId $jobId
+  $requestFile=Join-Path $statusDir ($jobId+'.request.json')
+  $request.statusFile=$statusFile
+  $request.jobId=$jobId
+  ($request|ConvertTo-Json -Depth 30)|Set-Content -LiteralPath $requestFile -Encoding UTF8
+  $worker=Join-Path $BridgeDir 'build-worker.ps1'
+  if(-not(Test-Path -LiteralPath $worker)){
+    Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
+    throw 'SigmaNEST background worker is missing: '+$worker
+  }
+  $started=(Get-Date).ToUniversalTime()
+  $initial=[ordered]@{
+    jobId=$jobId
+    state='STARTING'
+    phase='QUEUED'
+    message='SigmaNEST build accepted and queued.'
+    workerVersion='2.11.1'
+    pid=$null
+    started=$started.ToString('o')
+    finished=$null
+    elapsedSeconds=0
+    result=$null
+    parts=@($request.reportParts)
+    outputDir=[string]$request.outputDir
+    jobName=[string]$request.jobName
+    selectedSheets=@($request.selectedSheets)
+  }
+  Write-BuildStatus -statusFile $statusFile -obj $initial
+  $psExe=Join-Path $PSHOME 'powershell.exe'
+  if(-not(Test-Path -LiteralPath $psExe)){$psExe=(Get-Command powershell.exe -ErrorAction Stop).Source}
+  $psi=New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName=$psExe
+  $psi.Arguments='-NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$requestFile+'"'
+  $psi.WorkingDirectory=$BridgeDir
+  $psi.UseShellExecute=$false
+  $psi.CreateNoWindow=$true
+  $psi.RedirectStandardOutput=$false
+  $psi.RedirectStandardError=$false
+  try{
+    $proc=[Diagnostics.Process]::Start($psi)
+    $initial.pid=$proc.Id
+    $initial.state='RUNNING'
+    $initial.phase='STARTING'
+    $initial.message='SigmaNEST background worker is running.'
+    Write-BuildStatus -statusFile $statusFile -obj $initial
+  }catch{
+    Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
+    throw ('Could not start SigmaNEST background worker: '+$_.Exception.Message)
+  }
+  [pscustomobject]@{jobId=$jobId;statusFile=$statusFile;requestFile=$requestFile;pid=$proc.Id;started=$started.ToString('o')}
+}
+
+function Read-BuildStatus([string]$jobId){
+  $statusFile=Get-BuildStatusPath -jobId $jobId
+  if(-not(Test-Path -LiteralPath $statusFile)){return $null}
+  try{return (Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json)}
+  catch{return [pscustomobject]@{jobId=$jobId;state='RUNNING';phase='STATUS_READ';message='Build status is being written; retry shortly.'}}
+}
+function Handle-Request($req){
   if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
   if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
     return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG['libraryRoot'];dxfRoot=$CFG['dxfRoot'];lastScan=$CFG['lastScan'];count=[int]$CFG['count'];discoveredFiles=[int]$CFG['discoveredFiles'];prsCount=[int]$CFG['prsCount'];dxfCount=[int]$CFG['dxfCount'];dxfIndexState=[string]$CFG['dxfIndexState'];dxfIndexMessage=[string]$CFG['dxfIndexMessage'];sigmaNestCom=$true;bridge='PowerShell'}}
@@ -994,7 +1064,6 @@ function Get-BuildStatusPath([string]$jobId){
         }
       }
     }
-
     $engineRequest=[pscustomobject]@{
       jobName=$name
       libraryRoot=$jobRoot
@@ -1015,7 +1084,6 @@ function Get-BuildStatusPath([string]$jobId){
         }
       })
     }
-
     $workerRequest=[pscustomobject]@{
       jobId=''
       statusFile=''
@@ -1025,15 +1093,12 @@ function Get-BuildStatusPath([string]$jobId){
       reportParts=$reportParts
       engineRequest=$engineRequest
     }
-
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-
     $reviewText=if($review.Count -gt 0){
       "SigmaNEST job accepted. $($importable.Count) of $($parts.Count) CL part(s) have geometry and are being imported in the background. $($review.Count) part(s) require attention and will be listed in Part Review."
     }else{
       "SigmaNEST job accepted. All $($parts.Count) CL part(s) have geometry and are being imported in the background."
     }
-
     return [pscustomobject]@{
       Status=202
       Data=@{
@@ -1055,418 +1120,11 @@ function Get-BuildStatusPath([string]$jobId){
         taskPlan=@($taskPlan)
       }
     }
-
   if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
     $jobId=$Matches[1]
     $status=Read-BuildStatus -jobId $jobId
     if($null -eq $status){return [pscustomobject]@{Status=404;Data=@{error='Build job not found.';jobId=$jobId}}}
     return [pscustomobject]@{Status=200;Data=$status}
-  }
-  [pscustomobject]@{Status=404;Data=@{error='Not found'}}
-}
-
-$listener = New-Object -TypeName Net.Sockets.TcpListener -ArgumentList ([Net.IPAddress]::Loopback,$PORT)
-$listener.Start()
-Write-Host "CL-WS-Creator PowerShell bridge listening on http://127.0.0.1:$PORT"
-Write-Host "PRS library default: $DEFAULT_LIBRARY"
-Write-Host "DXF library default: $DEFAULT_DXF_LIBRARY"
-Write-Host "DXF workers: $(Get-DxfWorkerCount); nightly refresh hour: $($CFG['dxfNightlyHour'])"
-Initialize-DxfScheduler
-$lastSchedulerCheck=Get-Date
-while($true){
-  $acceptTask=$listener.AcceptTcpClientAsync()
-  while(-not $acceptTask.Wait(1000)){
-    if(((Get-Date)-$lastSchedulerCheck).TotalSeconds -ge 30){
-      Invoke-DxfScheduler
-      $lastSchedulerCheck=Get-Date
-    }
-  }
-  if(((Get-Date)-$lastSchedulerCheck).TotalSeconds -ge 30){
-    Invoke-DxfScheduler
-    $lastSchedulerCheck=Get-Date
-  }
-  $client=$acceptTask.Result
-  try{
-    $req=Read-HttpRequest $client
-    try{$resp=Handle-Request $req}catch{$resp=[pscustomobject]@{Status=500;Data=@{error=$_.Exception.Message}}}
-    Send-Json $client $resp.Status $resp.Data
-  }catch{
-    try{Send-Json $client 500 @{error=$_.Exception.Message}}catch{}
-  }
-}
-){throw 'Invalid build job ID.'}
-  $dir=Join-Path $BridgeDir 'build-status'
-  $path=Join-Path $dir ($jobId+'.json')
-  $full=[IO.Path]::GetFullPath($path)
-  $rootFull=[IO.Path]::GetFullPath($dir)
-  if(-not $full.StartsWith(($rootFull.TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase)){throw 'Invalid build status path.'}
-  return $full
-}
-
-function Start-SigmaNestBuildWorker($request){
-  $statusDir=Join-Path $BridgeDir 'build-status'
-  New-Item -ItemType Directory -Path $statusDir -Force|Out-Null
-  $jobId=[Guid]::NewGuid().ToString()
-  $statusFile=Get-BuildStatusPath -jobId $jobId
-  $requestFile=Join-Path $statusDir ($jobId+'.request.json')
-  $request.statusFile=$statusFile
-  $request.jobId=$jobId
-  ($request|ConvertTo-Json -Depth 30)|Set-Content -LiteralPath $requestFile -Encoding UTF8
-
-  $worker=Join-Path $BridgeDir 'build-worker.ps1'
-  if(-not(Test-Path -LiteralPath $worker)){
-    Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
-    throw 'SigmaNEST background worker is missing: '+$worker
-  }
-
-  $started=(Get-Date).ToUniversalTime()
-  $initial=[ordered]@{
-    jobId=$jobId
-    state='STARTING'
-    phase='QUEUED'
-    message='SigmaNEST build accepted and queued.'
-    workerVersion='2.11.1'
-    pid=$null
-    started=$started.ToString('o')
-    finished=$null
-    elapsedSeconds=0
-    result=$null
-    parts=@($request.reportParts)
-    outputDir=[string]$request.outputDir
-    jobName=[string]$request.jobName
-    selectedSheets=@($request.selectedSheets)
-  }
-  Write-BuildStatus -statusFile $statusFile -obj $initial
-
-  $psExe=Join-Path $PSHOME 'powershell.exe'
-  if(-not(Test-Path -LiteralPath $psExe)){$psExe=(Get-Command powershell.exe -ErrorAction Stop).Source}
-
-  $psi=New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName=$psExe
-  $psi.Arguments='-NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$requestFile+'"'
-  $psi.WorkingDirectory=$BridgeDir
-  $psi.UseShellExecute=$false
-  $psi.CreateNoWindow=$true
-  $psi.RedirectStandardOutput=$false
-  $psi.RedirectStandardError=$false
-
-  try{
-    $proc=[Diagnostics.Process]::Start($psi)
-    $initial.pid=$proc.Id
-    $initial.state='RUNNING'
-    $initial.phase='STARTING'
-    $initial.message='SigmaNEST background worker is running.'
-    Write-BuildStatus -statusFile $statusFile -obj $initial
-  }catch{
-    Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
-    throw ('Could not start SigmaNEST background worker: '+$_.Exception.Message)
-  }
-
-  [pscustomobject]@{
-    jobId=$jobId
-    statusFile=$statusFile
-    requestFile=$requestFile
-    pid=$proc.Id
-    started=$started.ToString('o')
-  }
-}
-
-function Read-BuildStatus([string]$jobId){
-  $statusFile=Get-BuildStatusPath -jobId $jobId
-  if(-not(Test-Path -LiteralPath $statusFile)){return $null}
-  try{
-    return (Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json)
-  }catch{
-    return [pscustomobject]@{
-      jobId=$jobId
-      state='RUNNING'
-      phase='STATUS_READ'
-      message='Build status is being written; retry shortly.'
-    }
-  }
-}
-
-function Handle-Request($req){
-  if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
-  if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG['libraryRoot'];dxfRoot=$CFG['dxfRoot'];lastScan=$CFG['lastScan'];count=[int]$CFG['count'];discoveredFiles=[int]$CFG['discoveredFiles'];prsCount=[int]$CFG['prsCount'];dxfCount=[int]$CFG['dxfCount'];dxfIndexState=[string]$CFG['dxfIndexState'];dxfIndexMessage=[string]$CFG['dxfIndexMessage'];sigmaNestCom=$true;bridge='PowerShell'}}
-  }
-  if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
-    $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
-    $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
-    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
-    # Start the huge DXF walk in a background PowerShell process; never wait on Y:\ here.
-    $dxfStatus=Start-DxfScan -root $dxfRoot
-    $diag=Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot
-    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;dxfIndexedCount=$dxfStatus.filesFound;dxfStatus=$dxfStatus;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot}}
-  }
-  if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
-    $status=Get-DxfStatus
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;mode=[string]$status.mode;started=$status.started;finished=$status.finished;generatedUtc=$status.generatedUtc;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});exitCode=$(try{[int]$status.exitCode}catch{0});workers=$(try{[int]$status.workers}catch{[int]$CFG['dxfWorkers']});workersCompleted=$(try{[int]$status.workersCompleted}catch{0});directoriesVisited=$(try{[int]$status.directoriesVisited}catch{0});elapsedSeconds=$(try{[double]$status.elapsedSeconds}catch{0});logFile=[string]$status.logFile;workDirectory=[string]$status.workDirectory;nextRefreshLocal=(Get-NextDxfRefreshLocal)}}
-  }
-  if($req.Path -eq '/api/dxf-refresh' -and $req.Method -eq 'POST'){
-    $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
-    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
-    $status=Get-DxfStatus
-    if([string]$status.state -eq 'RUNNING'){
-      return [pscustomobject]@{Status=200;Data=@{ok=$true;started=$false;dxfStatus=$status;message='A DXF indexing run is already active.'}}
-    }
-    $status=Start-DxfScan -root $dxfRoot -mode 'REFRESH' -force
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;started=$true;dxfStatus=$status;message='DXF refresh started in the background using controlled parallel workers.'}}
-  }
-  if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
-    $b=$req.Body|ConvertFrom-Json
-    $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
-    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
-    $dxfStatus=Get-DxfStatus
-    if([string]$dxfStatus.root -ne [string]$dxfRoot -or [string]$dxfStatus.state -ne 'COMPLETE'){
-      $dxfStatus=Start-DxfScan -root $dxfRoot
-    }
-    # The server enforces the same rule as the UI: never classify unresolved
-    # DXFs as missing/review while the massive Y:\ index is incomplete.
-    if([string]$dxfStatus.root -eq [string]$dxfRoot -and [string]$dxfStatus.state -ne 'COMPLETE'){
-      $statusCode=409
-      return [pscustomobject]@{Status=$statusCode;Data=@{
-        error='DXF index is not complete yet.'
-        code='DXF_INDEX_NOT_READY'
-        state=[string]$dxfStatus.state
-        filesFound=[int]$dxfStatus.filesFound
-        root=[string]$dxfStatus.root
-        message=[string]$dxfStatus.message
-        currentPath=[string]$dxfStatus.currentPath
-      }}
-    }
-    if(
-      -not $script:INDEX -or
-      $script:INDEX.Count -eq 0 -or
-      [string]$CFG['libraryRoot'] -ne [string]$prsRoot -or
-      [string]$CFG['dxfRoot'] -ne [string]$dxfRoot -or
-      ([string]$dxfStatus.state -eq 'COMPLETE' -and [string]$CFG['dxfIndexState'] -ne 'COMPLETE')
-    ){
-      Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot|Out-Null
-    }
-    $jobRoot=$prsRoot
-    $name=([string]$(if($b.jobName){$b.jobName}else{'CL_JOB'}) -replace '[^A-Za-z0-9._ -]','_').Trim();if(-not$name){$name='CL_JOB'}
-    $parts=@()
-    foreach($p in @($b.parts)){
-      $f=Find-Part -part ([string]$p.part) -clMat ([string]$p.material) -clThk ([string]$p.thickness)
-      if(-not$f){
-        $ds=Get-DxfStatus
-        if([string]$ds.root -eq [string]$dxfRoot -and [string]$ds.state -eq 'RUNNING'){
-          Set-Prop $p 'status' 'REVIEW' | Out-Null
-          Set-Prop $p 'statusLabel' 'DXF INDEXING' | Out-Null
-          Set-Prop $p 'reviewReason' 'DXF server index is still being built; rerun the build when indexing completes' | Out-Null
-        }else{
-          Set-Prop $p 'status' 'MISSING' | Out-Null
-          Set-Prop $p 'statusLabel' 'GEOMETRY MISSING' | Out-Null
-          Set-Prop $p 'reviewReason' 'No matching .PRS or .DXF was found in the geometry library' | Out-Null
-        }
-        $parts+=$p
-        continue
-      }
-      # Ambiguity is now metadata on a real selected geometry candidate.
-      # Do not discard the source: reviewed parts must still be importable.
-      $selectionAmbiguous=[bool]$(if($f.selectionAmbiguous){$f.selectionAmbiguous}else{$false})
-      $selectionFuzzy=[bool]$(if($f.selectionFuzzy){$f.selectionFuzzy}else{$false})
-
-      $sourceType=[string]$f.fileType
-      $libMat=[string]$f.likelyMaterial
-      $libThk=[string]$f.thickness
-      $clMat=[string]$p.material
-      $clThk=[string]$p.thickness
-      $matKnown=!!$libMat.Trim()
-      $thkKnown=!!$libThk.Trim()
-      $clMatKnown=!!$clMat.Trim()
-      $clThkKnown=!!$clThk.Trim()
-      $mok=$true
-      $tok=$true
-      if($matKnown -and $clMatKnown){$mok=Material-Equal -a $clMat -b $libMat -aThickness $clThk -bThickness $libThk}
-      if($thkKnown -and $clThkKnown){$tok=(Thickness-Number -s $clThk) -eq (Thickness-Number -s $libThk)}
-      $variation=([string]$f.matchType -eq 'VARIATION')
-
-      $reviewReason=''
-      if($selectionAmbiguous){
-        $status='REVIEW'
-        $label='AMBIGUOUS ('+[int]$f.ambiguousCount+')'
-        $scores=@($f.candidateScores|Select-Object -First 3)
-        $reviewReason='Multiple geometry candidates matched; best candidate selected for import. '+(($scores|ForEach-Object{[IO.Path]::GetFileName([string]$_.file)+' score '+$_.score}) -join ' | ')
-      }elseif($selectionFuzzy){
-        $status='REVIEW'
-        $label='FUZZY MATCH - REVIEW'
-        $reviewReason='Geometry selected by conservative assembly-prefix matching; confirm the drawing before production.'
-      }elseif([bool]$p.clReview){
-        $status='REVIEW'
-        $label=[string]$p.clReviewReason
-        $reviewReason=[string]$(if($p.clReviewDetail){$p.clReviewDetail}else{'Conflicting CL values were kept separate and require confirmation'})
-      }elseif(-not $clMatKnown -or -not $clThkKnown){
-        $status='REVIEW'
-        $label='CL MATERIAL/THICKNESS MISSING'
-        $reviewReason='CL material or thickness is missing'
-      }elseif($sourceType -eq 'DXF' -and $variation){
-        $status='REVIEW'
-        $label='VARIATION - DXF REVIEW'
-        $reviewReason='The geometry was found as a DXF by a variation match and needs confirmation'
-      }elseif($sourceType -eq 'PRS' -and $variation -and $matKnown -and $thkKnown -and $mok -and $tok){
-        $status='READY'
-        $label='FOUND - PRS VARIATION'
-      }elseif($variation){
-        $status='REVIEW'
-        $label='VARIATION - REVIEW'
-        $reviewReason='Variation match needs confirmation'
-      }elseif($sourceType -eq 'DXF'){
-        $status='READY'
-        $label='FOUND - DXF'
-      }elseif($matKnown -and -not $mok){
-        $status='REVIEW'
-        $label='MATERIAL MISMATCH'
-        $reviewReason='PRS material conflicts with CL material'
-      }elseif($thkKnown -and -not $tok){
-        $status='REVIEW'
-        $label='THICKNESS MISMATCH'
-        $reviewReason='PRS thickness conflicts with CL thickness'
-      }else{
-        $status='READY'
-        $label=if($matKnown -and $thkKnown){'FOUND - PRS'}else{'FOUND - PRS USING CL DATA'}
-      }
-
-      Set-Prop -obj $p -name 'status' -value $status | Out-Null
-      Set-Prop -obj $p -name 'statusLabel' -value $label | Out-Null
-      Set-Prop -obj $p -name 'reviewReason' -value $reviewReason | Out-Null
-      Set-Prop -obj $p -name 'sourcePath' -value ([string]$f.file) | Out-Null
-      Set-Prop -obj $p -name 'sourceType' -value $sourceType | Out-Null
-      Set-Prop -obj $p -name 'file' -value ([string]$f.file) | Out-Null
-      Set-Prop -obj $p -name 'prs' -value $(if($sourceType -eq 'PRS'){[string]$f.file}else{''}) | Out-Null
-      Set-Prop -obj $p -name 'sourceDxf' -value $(if($sourceType -eq 'DXF'){[string]$f.file}else{[string]$f.sourceDxf}) | Out-Null
-      Set-Prop -obj $p -name 'matchType' -value $f.matchType | Out-Null
-      Set-Prop $p 'libraryMaterial' $libMat | Out-Null
-      Set-Prop $p 'libraryThickness' $libThk | Out-Null
-      $parts+=$p
-    }
-    $review=@($parts|Where-Object {$_.status -ne 'READY'})
-    $reviewBreakdown=[ordered]@{}
-    foreach($rp in $review){
-      $reason=[string]$rp.statusLabel
-      if([string]::IsNullOrWhiteSpace($reason)){$reason='REVIEW'}
-      if(-not $reviewBreakdown.Contains($reason)){$reviewBreakdown[$reason]=0}
-      $reviewBreakdown[$reason]=[int]$reviewBreakdown[$reason]+1
-    }
-    $staging=Write-Job -root $jobRoot -name $name -parts $parts
-
-    # Review no longer blocks WS creation. Any part with a resolved geometry
-    # source is handed to SigmaNEST, even when it is marked REVIEW so the
-    # operator can correct it directly in SigmaNEST. Only true MISSING rows
-    # have no geometry to import.
-    $importable=@($parts|Where-Object {-not [string]::IsNullOrWhiteSpace([string]$_.sourcePath)})
-    $missing=@($parts|Where-Object {$_.status -eq 'MISSING'})
-    if($importable.Count -eq 0){
-      return [pscustomobject]@{
-        Status=200
-        Data=@{
-          outputDir=$staging
-          message="No geometry could be imported into SigmaNEST. $($missing.Count) part(s) have missing geometry."
-          parts=$parts
-          reviewCount=$review.Count
-          reviewBreakdown=$reviewBreakdown
-          sigmaNestCreated=$false
-          sigmaPartCount=0
-          importedCount=0
-          missingCount=$missing.Count
-          taskPlan=@()
-        }
-      }
-    }
-
-    $reqFile=Join-Path $ROOT ('_psrequest-'+[Diagnostics.Process]::GetCurrentProcess().Id+'-'+[DateTime]::Now.Ticks+'.json')
-    $request=[pscustomobject]@{
-      jobName=$name
-      libraryRoot=$jobRoot
-      dxfRoot=$dxfRoot
-      wsDirectory=[string]$b.wsDirectory
-      parts=@($importable|ForEach-Object{
-        [pscustomobject]@{
-          part=$_.part
-          qty=$_.qty
-          batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1})
-          taskBatches=@($_.taskBatches)
-          taskSheet=$_.sheet
-          sourcePath=$_.sourcePath
-          sourceType=$_.sourceType
-          prsPath=$(if($_.sourceType -eq 'PRS'){[string]$_.sourcePath}else{''})
-          sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial))
-          thicknessMm=(Thickness-Number -s ([string]$_.thickness))
-        }
-      })
-    }
-    ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
-    try{
-      $data=Invoke-SigmaNestBuild -Request $request
-      $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
-      $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
-      $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
-
-      if($data){
-        ($data|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $creatorOut -Encoding UTF8
-        [string]::Empty|Set-Content -LiteralPath $creatorErr -Encoding UTF8
-        ($data|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $creatorResult -Encoding UTF8
-      }
-
-      if($null -eq $data){
-        throw 'Direct SigmaNEST COM routine returned no result.'
-      }
-      if(-not [bool]$data.ok){
-        $phase=[string]$data.phase
-        $errorText=[string]$data.error
-        if([string]::IsNullOrWhiteSpace($phase)){$phase='UNKNOWN'}
-        if([string]::IsNullOrWhiteSpace($errorText)){$errorText='Unknown SigmaNEST COM error.'}
-        throw ('SigmaNEST direct COM build failed at '+$phase+': '+$errorText)
-      }
-
-      $taskPlan=@()
-      foreach($p0 in @($parts)){
-        if($p0.taskBatches){
-          foreach($tb in @($p0.taskBatches)){
-            $taskPlan += [pscustomobject]@{
-              sheet=[string]$tb.sheet
-              batchMultiplier=$(if($tb.batchMultiplier){$tb.batchMultiplier}else{1})
-              part=[string]$p0.part
-              qty=[double]$(if($tb.vehicleQty){$tb.vehicleQty}else{$p0.qty})
-            }
-          }
-        }else{
-          $taskPlan += [pscustomobject]@{
-            sheet=[string]$p0.sheet
-            batchMultiplier=$(if($p0.batchMultiplier){$p0.batchMultiplier}else{1})
-            part=[string]$p0.part
-            qty=[double]$p0.qty
-          }
-        }
-      }
-
-      $reviewText=if($review.Count -gt 0){
-        "WS created with $($data.partCount) of $($parts.Count) CL part(s). $($review.Count) part(s) require attention and are listed in Part Review."
-      }else{
-        "WS created with all $($data.partCount) CL part(s)."
-      }
-
-      return [pscustomobject]@{
-        Status=200
-        Data=@{
-          outputDir=$staging
-          message=$reviewText
-          parts=$parts
-          reviewCount=$review.Count
-          reviewBreakdown=$reviewBreakdown
-          sigmaNestCreated=$true
-          wsPath=$data.wsPath
-          sigmaPartCount=$data.partCount
-          importedCount=$importable.Count
-          missingCount=$missing.Count
-          taskPlan=@($taskPlan)
-        }
-      }
-    }finally{
-      Remove-Item -LiteralPath $reqFile -Force -ErrorAction SilentlyContinue
-    }
   }
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
 }
