@@ -496,12 +496,13 @@ function Candidate-Score($candidate,[string]$clMat,[string]$clThk,[string]$match
   # Geometry candidates are selected from the part-name match only.
   # PRS metadata (material/thickness) is intentionally ignored. The PRS
   # contributes geometry/path only; CL owns material, thickness and quantity.
-  return [int](switch($matchType){
+  $score=switch($matchType){
     'EXACT' {300}
     'EMBEDDED' {200}
     'VARIATION' {100}
     default {0}
-  })
+  }
+  return [int]$score
 }
 
 function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[string]$matchType='EXACT') {
