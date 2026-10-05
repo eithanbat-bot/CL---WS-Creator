@@ -772,6 +772,7 @@ function Invoke-DxfScheduler(){
   }catch{}
 }
 
+
 function Write-BuildStatus($statusFile,$obj){
   $dir=Split-Path -Parent $statusFile
   New-Item -ItemType Directory -Path $dir -Force|Out-Null
@@ -989,7 +990,7 @@ function Get-BuildStatusPath([string]$jobId){
           sheet=[string]$p0.sheet
           batchMultiplier=$(if($p0.batchMultiplier){$p0.batchMultiplier}else{1})
           part=[string]$p0.part
-          qty=[double]$p0.qty
+          qty=[double]$(if($p0.vehicleQty){$p0.vehicleQty}else{$p0.qty})
         }
       }
     }
@@ -1054,7 +1055,6 @@ function Get-BuildStatusPath([string]$jobId){
         taskPlan=@($taskPlan)
       }
     }
-  }
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
 }
 
@@ -1078,7 +1078,16 @@ while($true){
     Invoke-DxfScheduler
     $lastSchedulerCheck=Get-Date
   }
-  $client=$acceptTask.Result
+  $client=$a
+  if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
+    $jobId=$Matches[1]
+    $status=Read-BuildStatus -jobId $jobId
+    if($null -eq $status){
+      return [pscustomobject]@{Status=404;Data=@{error='Build job not found.';jobId=$jobId}}
+    }
+    return [pscustomobject]@{Status=200;Data=$status}
+  }
+cceptTask.Result
   try{
     $req=Read-HttpRequest $client
     try{$resp=Handle-Request $req}catch{$resp=[pscustomobject]@{Status=500;Data=@{error=$_.Exception.Message}}}
