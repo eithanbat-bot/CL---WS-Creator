@@ -217,5 +217,5 @@ if(-not(Test-Path -LiteralPath $Server)){
 Say "Starting bridge $(Get-Version $Server) on http://127.0.0.1:$Port" 'Cyan'
 $ps=(Join-Path $PSHOME 'powershell.exe')
 if(-not(Test-Path -LiteralPath $ps)){ $ps=(Get-Command powershell.exe -ErrorAction Stop).Source }
-& $ps -NoProfile -ExecutionPolicy Bypass -File $Server
+& $ps -NoProfile -ExecutionPolicy Bypass -STA -File $Server
 exit $LASTEXITCODE
