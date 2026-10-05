@@ -1120,6 +1120,7 @@ function Handle-Request($req){
         taskPlan=@($taskPlan)
       }
     }
+  }
   if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
     $jobId=$Matches[1]
     $status=Read-BuildStatus -jobId $jobId
