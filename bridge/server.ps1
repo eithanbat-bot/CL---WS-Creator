@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.9.6'
+$BRIDGE_VERSION = '2.9.7'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -1024,21 +1024,52 @@ function Handle-Request($req){
       $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
       $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
       $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
+      # Create a sentinel before invoking the creator. The creator itself
+      # overwrites this with STARTUP diagnostics as its first executable action.
+      [ordered]@{
+        ok=$false
+        phase='INVOKE_PRE'
+        bridgeVersion=$BRIDGE_VERSION
+        creatorVersion='3.5.0'
+        localWorker=$localWorker
+        localRequest=$localRequest
+        localResult=$localResult
+        message='Bridge reached the creator invocation point; waiting for creator startup.'
+      }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $localResult -Encoding UTF8
+
       try{
-        & $localWorker -RequestFile $localRequest -ResultFile $localResult | Out-File -LiteralPath $creatorOut -Encoding UTF8
+        $invokeOutput=& $localWorker -RequestFile $localRequest -ResultFile $localResult 2>&1
+        @($invokeOutput|ForEach-Object{[string]$_})|Set-Content -LiteralPath $creatorOut -Encoding UTF8
       }catch{
         [string]$_.Exception.ToString()|Set-Content -LiteralPath $creatorErr -Encoding UTF8
+        try{
+          [ordered]@{
+            ok=$false
+            phase='INVOKE_CATCH'
+            bridgeVersion=$BRIDGE_VERSION
+            creatorVersion='3.5.0'
+            error=$_.Exception.ToString()
+            localWorker=$localWorker
+            localRequest=$localRequest
+            localResult=$localResult
+          }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $localResult -Encoding UTF8
+        }catch{}
         throw
       }
 
       $rawText=''
       $errText=''
-      if(Test-Path -LiteralPath $localResult){
+      $localResultExists=Test-Path -LiteralPath $localResult
+      $localResultLength=0
+      if($localResultExists){
+        try{$localResultLength=[int64](Get-Item -LiteralPath $localResult).Length}catch{}
         try{$rawText=[string](Get-Content -LiteralPath $localResult -Raw -Encoding UTF8).Trim()}catch{}
         try{Copy-Item -LiteralPath $localResult -Destination $creatorResult -Force}catch{}
       }
-      if([string]::IsNullOrWhiteSpace($rawText)){
-        $detail='SigmaNEST creator returned no result from the in-process STA invocation.'
+      if([string]::IsNullOrWhiteSpace($rawText) -or $rawText -match 'INVOKE_PRE'){
+        $detail='SigmaNEST creator returned no usable result from the in-process STA invocation.'
+        $detail+=' localResultExists='+$localResultExists+' localResultBytes='+$localResultLength
+        $detail+=' invokeOutput='+(try{(@($invokeOutput)|ForEach-Object{[string]$_}) -join ' || '}catch{''})
         if(Test-Path -LiteralPath $creatorErr){
           $errText=[string](Get-Content -LiteralPath $creatorErr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue).Trim()
           if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' ERROR: '+$errText}
