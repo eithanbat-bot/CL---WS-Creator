@@ -398,12 +398,31 @@ function reviewBreakdownText(breakdown){
 function sleep(ms){return new Promise(function(resolve){window.setTimeout(resolve,ms)})}
 
 async function waitForBuild(jobId,job,selectedNames){
+  var reportWritten=false;
   while(true){
     var s=await bridge('/api/build-status/'+encodeURIComponent(jobId),{timeoutMs:10000});
     var elapsed=Number(s.elapsedSeconds)||0;
     if(String(s.state||'').toUpperCase()==='RUNNING' || String(s.state||'').toUpperCase()==='STARTING'){
       var phase=s.phase||'WORKING';
       var detail=s.message||'SigmaNEST background worker is running.';
+      if(String(phase).toUpperCase()==='PREPARED' && !reportWritten && Array.isArray(s.parts)){
+        var interim={
+          parts:s.parts,
+          outputDir:s.outputDir||'',
+          wsPath:s.wsPath||'',
+          reviewCount:s.reviewCount||0,
+          reviewBreakdown:s.reviewBreakdown||{},
+          importedCount:0,
+          missingCount:s.missingCount||0
+        };
+        try{
+          await writeReportSheets(interim,job,selectedNames);
+          reportWritten=true;
+          detail+=' Summary and Part Review are now written to this workbook.';
+        }catch(e){
+          detail+=' Report sheets will be retried: '+(e&&e.message?e.message:String(e));
+        }
+      }
       $('buildStatus').textContent=detail+' Elapsed: '+Math.floor(elapsed)+'s. Phase: '+phase+'.';
       pill('Building job','neutral');
       await sleep(2500);
