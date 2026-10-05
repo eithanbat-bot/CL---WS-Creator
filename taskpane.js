@@ -395,11 +395,82 @@ function reviewBreakdownText(breakdown){
   return entries.join(' | ');
 }
 
+function sleep(ms){return new Promise(function(resolve){window.setTimeout(resolve,ms)})}
+
+async function waitForBuild(jobId,job,selectedNames){
+  while(true){
+    var s=await bridge('/api/build-status/'+encodeURIComponent(jobId),{timeoutMs:10000});
+    var elapsed=Number(s.elapsedSeconds)||0;
+    if(String(s.state||'').toUpperCase()==='RUNNING' || String(s.state||'').toUpperCase()==='STARTING'){
+      var phase=s.phase||'WORKING';
+      var detail=s.message||'SigmaNEST background worker is running.';
+      $('buildStatus').textContent=detail+' Elapsed: '+Math.floor(elapsed)+'s. Phase: '+phase+'.';
+      pill('Building job','neutral');
+      await sleep(2500);
+      continue;
+    }
+
+    var finalResult=s.result||{};
+    finalResult.parts=s.parts||finalResult.parts||[];
+    finalResult.outputDir=s.outputDir||finalResult.outputDir||'';
+    finalResult.wsPath=finalResult.wsPath||s.wsPath||'';
+    finalResult.importedCount=finalResult.importedCount!=null?finalResult.importedCount:(s.importedCount!=null?s.importedCount:0);
+    finalResult.missingCount=finalResult.missingCount!=null?finalResult.missingCount:(s.missingCount!=null?s.missingCount:0);
+    finalResult.reviewCount=finalResult.reviewCount!=null?finalResult.reviewCount:(s.reviewCount!=null?s.reviewCount:0);
+    finalResult.reviewBreakdown=finalResult.reviewBreakdown||s.reviewBreakdown||{};
+
+    var out=finalResult.parts||[];
+    showParts(out,'build');
+
+    var imported=Number(finalResult.importedCount)||0;
+    var missing=Number(finalResult.missingCount)||out.filter(function(x){return x.status==='MISSING'}).length;
+    var reviewCount=Number(finalResult.reviewCount)||out.filter(function(x){return x.status!=='READY'}).length;
+    $('geometryFound').textContent=imported;
+    $('geometryMissing').textContent=reviewCount;
+    $('totalQty').textContent=sumQty(out);
+
+    var state=String(s.state||'').toUpperCase();
+    if(state==='COMPLETE'){
+      var msg=s.message||finalResult.message||'SigmaNEST job completed.';
+      if(finalResult.wsPath)msg+=' WS: '+finalResult.wsPath+'.';
+      msg+=' Imported into WS: '+imported+' of '+out.length+'.';
+      if(missing>0)msg+=' Missing geometry: '+missing+'.';
+      if(reviewCount>0 && Object.keys(finalResult.reviewBreakdown||{}).length){
+        msg+=' Reasons: '+reviewBreakdownText(finalResult.reviewBreakdown)+'.';
+      }
+
+      try{
+        await writeReportSheets(finalResult,job,selectedNames);
+        msg+=' Summary and Part Review sheets written to this workbook.';
+      }catch(e){
+        var reportError=e&&e.message?e.message:String(e);
+        msg+=' (Could not write report sheets: '+reportError+')';
+      }
+
+      $('buildStatus').textContent=msg+' Completed in '+Math.floor(Number(s.elapsedSeconds)||0)+'s.';
+      pill(reviewCount?'Review required':'Job created',reviewCount?'warn':'ok');
+      return finalResult;
+    }
+
+    // A failed worker may still have created geometry before its final error.
+    var failMsg=s.message||finalResult.error||'SigmaNEST background build failed.';
+    try{
+      await writeReportSheets(finalResult,job,selectedNames);
+      failMsg+=' A Summary and Part Review were written from the completed diagnostic state.';
+    }catch(e){
+      failMsg+=' (Could not write report sheets: '+(e&&e.message?e.message:String(e))+')';
+    }
+    $('buildStatus').textContent=failMsg+' Elapsed: '+Math.floor(Number(s.elapsedSeconds)||0)+'s.';
+    pill('Build failed','bad');
+    throw new Error(failMsg);
+  }
+}
+
 async function build(){
   var btn=$('build');
   btn.disabled=true;
-  pill('Building job','neutral');
-  $('buildStatus').textContent='Matching geometry and building the SigmaNEST job...';
+  pill('Starting job','neutral');
+  $('buildStatus').textContent='Matching geometry and starting the SigmaNEST background job...';
   try{
     var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
     var dxfStatus=await bridge('/api/dxf-status',{timeoutMs:4000});
@@ -409,37 +480,40 @@ async function build(){
       pill('DXF index not ready','warn');
       return;
     }
+
     var parts=await readCL();
     var selectedNames=selectedSheets().map(function(s){return s.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
+
     var r=await bridge('/api/build-job',{
       method:'POST',
-      timeoutMs:600000,
-      body:JSON.stringify({prsRoot:prsRoot,dxfRoot:dxfRoot,jobName:job,parts:parts})
+      timeoutMs:15000,
+      body:JSON.stringify({
+        prsRoot:prsRoot,
+        dxfRoot:dxfRoot,
+        jobName:job,
+        selectedSheetNames:selectedNames,
+        parts:parts
+      })
     });
-    var out=r.parts||[];
-    showParts(out,'build');
-    var ready=out.filter(function(x){return x.status==='READY'}).length;
-    $('geometryFound').textContent=ready;
-    $('geometryMissing').textContent=out.length-ready;
-    var msg=r.message||'Job staged.';
-    if(r.wsPath)msg+=' WS: '+r.wsPath+'.';
-    if(r.importedCount!=null)msg+=' Imported into WS: '+r.importedCount+'.';
-    if(r.missingCount!=null&&r.missingCount>0)msg+=' Missing geometry: '+r.missingCount+'.';
-    if(r.reviewCount&&r.reviewBreakdown)msg+=' Reasons: '+reviewBreakdownText(r.reviewBreakdown)+'.';
-    try{
-      await writeReportSheets(r,job,selectedNames);
-      msg+=' Summary and Part Review sheets written to this workbook.';
-    }catch(e){
-      var detail=e&&e.message?e.message:String(e);
-      msg+=' (Could not write report sheets: '+detail+')';
+
+    if(!r.accepted || !r.jobId){
+      throw new Error(r.message||'The bridge did not accept the SigmaNEST background job.');
     }
-    $('buildStatus').textContent=msg;
-    pill(r.reviewCount?'Review required':'Job created',r.reviewCount?'warn':'ok');
+
+    $('buildStatus').textContent=(r.message||'SigmaNEST job accepted.')+' Job ID: '+r.jobId+'. The build will continue independently of the Excel request timeout.';
+    pill('Building job','neutral');
+
+    // The HTTP request is now complete. From this point onward Excel only
+    // polls short status requests, so a long SigmaNEST build cannot time out
+    // the original build operation.
+    await waitForBuild(r.jobId,job,selectedNames);
   }catch(e){
     $('buildStatus').textContent=e.message;
-    if(e&&e.message&&e.message.indexOf('DXF index')>=0)pill('DXF index not ready','warn');else pill('Build error','bad');
+    if(e&&e.message&&e.message.indexOf('DXF index')>=0)pill('DXF index not ready','warn');
+    else if(e&&e.message&&e.message.indexOf('Cannot connect')>=0)pill('Bridge error','bad');
+    else if(String($('statusPill').textContent||'')!=='Build failed')pill('Build error','bad');
   }finally{
     updateCount();
   }
