@@ -329,6 +329,21 @@ function Invoke-SigmaNestBuild($Request){
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
     return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.3';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
-  }catch{return [pscustomobject]@{ok=$false;creatorVersion='DIRECT-COM-1.2';phase=$phase;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}}
+  }catch{
+    $checkpointExists=$false
+    try{$checkpointExists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
+    return [pscustomobject]@{
+      ok=$false
+      creatorVersion='DIRECT-COM-1.3'
+      phase=$phase
+      error=$_.Exception.Message
+      category=$_.CategoryInfo.ToString()
+      wsPath=$(if($checkpointExists){[string]$wsPath}else{''})
+      parts=$created
+      partCount=@($created).Count
+      checkpointSaved=$checkpointExists
+      message=$(if($checkpointExists){'SigmaNEST created a geometry/workspace checkpoint before the failure: '+[string]$wsPath}else{'SigmaNEST build failed before a workspace checkpoint was saved.'})
+    }
+  }
   finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
 }
