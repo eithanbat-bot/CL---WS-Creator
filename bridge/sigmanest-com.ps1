@@ -318,6 +318,21 @@ function SN-Verify-PartIdentity($partObj,$targetName,$sourcePath=''){
   if($sourceNorm -and $id.normalizedDrawing -eq $sourceNorm){return $true}
   return $false
 }
+function SN-Notify-PartRecordUpdated($setInfo){
+  if($null -eq $setInfo){return $false}
+  $obj=$setInfo.object
+  if($null -eq $obj){return $false}
+  try{
+    $methods=@(SN-ComMethodNames $obj)
+    if($methods -contains 'UpdatePartFileLoaded'){
+      $obj.UpdatePartFileLoaded()
+      return $true
+    }
+  }catch{
+    if(SN-IsDisconnected $_){throw}
+  }
+  return $false
+}
 function SN-Apply-WorkspacePartData($app,$requestParts){
   $updated=@()
   $usedIndices=@()
@@ -370,6 +385,13 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
       throw ('CL quantity '+$qty+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
     }
     $row.quantityProperty=[string]$setInfo.path
+    try{
+      [void](SN-Notify-PartRecordUpdated -setInfo $setInfo)
+    }catch{
+      if(SN-IsDisconnected $_){
+        throw ('SigmaNEST COM disconnected while committing CL part data for "'+$targetName+'" (0x80010108).')
+      }
+    }
     $updated += [pscustomobject]$row
   }
   @($updated)
