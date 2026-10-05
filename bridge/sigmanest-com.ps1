@@ -73,6 +73,56 @@ function SN-Add-Geometry($app,[string]$sourcePath,[string]$sourceType){
   throw ('SigmaNEST could not import "'+$label+'". '+($errors -join ' | '))
 }
 
+function SN-Set-TaskPartQuantity($app,$requestParts){
+  $tasks=@()
+  try{$tasks=@($app.TasksList)}catch{}
+  if($tasks.Count -eq 0){
+    throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL quantities safely.'
+  }
+
+  foreach($rp in @($requestParts)){
+    $targetName=[string]$rp.part
+    $quantity=[int][math]::Round([double]$rp.qty)
+    if($quantity -lt 1){$quantity=1}
+    $matched=$false
+
+    foreach($task in $tasks){
+      $taskParts=$null
+      try{$taskParts=$task.PartsList}catch{}
+      if($null -eq $taskParts){continue}
+
+      foreach($taskPart in @($taskParts)){
+        $taskPartName=''
+        try{$taskPartName=[string]$taskPart.Name}catch{}
+        if(-not [string]::IsNullOrWhiteSpace($taskPartName) -and
+           $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){
+
+          $set=$null
+          foreach($propertyName in @('Quantity','Qty','QtyRequired','QtyReq','BatchQty')){
+            try{
+              $taskPart.$propertyName=$quantity
+              $set=$propertyName
+              break
+            }catch{}
+          }
+
+          if(-not $set){
+            throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task="'+[string]$task.Name+'".')
+          }
+
+          $matched=$true
+          break
+        }
+      }
+
+      if($matched){break}
+    }
+
+    if(-not $matched){
+      throw ('Could not find CL part "'+$targetName+'" inside any SigmaNEST task after task creation.')
+    }
+  }
+}
 function Invoke-SigmaNestBuild($Request){
   $phase='START';$app=$null
   try{
@@ -98,13 +148,16 @@ function Invoke-SigmaNestBuild($Request){
       if([string]::IsNullOrWhiteSpace($sourcePath)){continue}
       $part=SN-Add-Geometry $app $sourcePath $sourceType
       $quantity=[int][math]::Round([double]$x.qty);if($quantity -lt 1){$quantity=1}
-      $quantityProperty=SN-Set-Required -obj $part -names @('BatchQty','QtyToNest','Quantity','Qty') -value $quantity -label 'quantity'
+      # Workspace ISNPartObj quantity is not the production/work-order quantity;
+      # apply the CL quantity to the task part after SigmaNEST creates the tasks.
+      $quantityProperty='TASK_PART_PENDING'
       $materialProperty=$null;if(-not [string]::IsNullOrWhiteSpace([string]$x.sigmaMaterial)){$materialProperty=SN-Set-Required -obj $part -names @('Material') -value ([string]$x.sigmaMaterial) -label 'material'}
       $thicknessProperty=$null;if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){$thicknessProperty=SN-Try-Set -obj $part -names @('Thickness','SheetThickness','Thk') -value ([double]$x.thicknessMm)}
       $sourceProperty=SN-Try-Set -obj $part -names @('SourceFilePath','SourcePath') -value ([string]$sourcePath);SN-Safe-Set $part 'WONumber' $safe;SN-Safe-Set $part 'DrawingNumber' ([string]$x.part)
       $created += [pscustomobject]@{part=$(try{[string]$part.Name}catch{[string]$x.part});qty=$quantity;material=$(try{[string]$part.Material}catch{[string]$x.sigmaMaterial});thickness=$(try{[string]$part.Thickness}catch{[string]$x.thicknessMm});quantityProperty=$quantityProperty;materialProperty=$materialProperty;thicknessProperty=$thicknessProperty;sourcePath=$sourcePath;sourceType=$sourceType;sourceProperty=$sourceProperty;batchMultiplier=$x.batchMultiplier;taskBatches=@($x.taskBatches)}
     }
-    $phase='CREATE_TASKS';try{$app.CreateTasksListForNewPartsInWS()}catch{}
+    $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
+    $phase='APPLY_TASK_QUANTITIES';SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
     return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
