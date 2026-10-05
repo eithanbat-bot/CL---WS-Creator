@@ -60,6 +60,12 @@ try{
 
   $prepared=Prepare-SigmaNestBuild -b $request.buildRequest
   if($null -eq $prepared){throw 'Background build preparation returned no result.'}
+  if($prepared.PSObject.Properties.Name -contains 'Status' -and [int]$prepared.Status -ne 200){
+    $prepMessage=''
+    try{ $prepMessage=[string]$prepared.Data.message }catch{}
+    if([string]::IsNullOrWhiteSpace($prepMessage)){$prepMessage='Background build preparation was rejected by the bridge.'}
+    throw $prepMessage
+  }
   $request.reportParts=@($prepared.parts)
   $request.outputDir=[string]$prepared.outputDir
   $request.jobName=[string]$prepared.jobName
