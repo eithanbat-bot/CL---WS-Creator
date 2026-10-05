@@ -8,6 +8,24 @@ function SN-Invoke-ComMethod($obj,[string]$name,[object[]]$args=@()){
   $obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::InvokeMethod,$null,$obj,$args)
 }
 
+function SN-ErrorText($err){
+  try{
+    $ex=$err.Exception
+    if($ex.InnerException){return [string]$ex.InnerException.Message}
+    return [string]$ex.Message
+  }catch{return [string]$err}
+}
+function SN-IsDisconnected($err){
+  try{
+    $hex=''
+    if($err.Exception -and $err.Exception.HResult -ne $null){
+      $hex=([int]$err.Exception.HResult).ToString('X8')
+    }
+    if($hex -eq '80010108'){return $true}
+    $msg=[string]$err.Exception.Message
+    return ($msg -match '(?i)0x80010108|RPC_E_DISCONNECTED|disconnected from its clients')
+  }catch{return $false}
+}
 function SN-Try-Set($obj,[string[]]$names,$value){
   if($null -eq $obj){return $null}
   foreach($name in $names){
@@ -91,6 +109,9 @@ function SN-Set-TaskMaterialAndThickness($app,$requestParts){
     }catch{}
 
     $matched=$false
+    $matchedTaskIndex=-1
+    $matchedPartIndex=-1
+
     for($ti=0;$ti -lt $taskCount -and -not $matched;$ti++){
       $task=$null
       try{$task=$app.TasksList.Items($ti)}catch{continue}
@@ -100,7 +121,6 @@ function SN-Set-TaskMaterialAndThickness($app,$requestParts){
       try{$taskPartCount=[int]$task.PartsList.Count}catch{}
       if($taskPartCount -le 0){continue}
 
-      $foundInTask=$false
       for($pi=0;$pi -lt $taskPartCount;$pi++){
         $taskPart=$null
         try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
@@ -108,98 +128,76 @@ function SN-Set-TaskMaterialAndThickness($app,$requestParts){
         $taskPartName=''
         try{$taskPartName=[string]$taskPart.Name}catch{}
         if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if($taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){
-          $foundInTask=$true
-          break
-        }
+        if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
+
+        $matched=$true
+        $matchedTaskIndex=$ti
+        $matchedPartIndex=$pi
+        break
       }
-      if(-not $foundInTask){continue}
-
-      if(-not [string]::IsNullOrWhiteSpace($material)){
-        $setMaterial=$null
-        foreach($propertyName in @('Material','MaterialName','Mat')){
-          try{
-            $task.$propertyName=$material
-            $readBack=[string]$task.$propertyName
-            if($readBack.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
-              $setMaterial=$propertyName
-              break
-            }
-          }catch{}
-        }
-
-        if(-not $setMaterial){
-          for($pi=0;$pi -lt $taskPartCount -and -not $setMaterial;$pi++){
-            $taskPart=$null
-            try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
-            if($null -eq $taskPart){continue}
-            $taskPartName=''
-            try{$taskPartName=[string]$taskPart.Name}catch{}
-            if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
-
-            foreach($propertyName in @('Material','MaterialName','Mat')){
-              try{
-                $taskPart.$propertyName=$material
-                $readBack=[string]$taskPart.$propertyName
-                if($readBack.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
-                  $setMaterial=$propertyName
-                  break
-                }
-              }catch{}
-            }
-          }
-        }
-
-        if(-not $setMaterial){
-          throw ('SigmaNEST task "'+[string]$task.Name+'" does not expose a writable material property on either Task or Task.PartsList. Requested="'+$material+'".')
-        }
-      }
-
-      if($null -ne $thickness){
-        $setThickness=$null
-        foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
-          try{
-            $task.$propertyName=$thickness
-            $readBack=[double]$task.$propertyName
-            if($readBack -eq $thickness){
-              $setThickness=$propertyName
-              break
-            }
-          }catch{}
-        }
-
-        if(-not $setThickness){
-          for($pi=0;$pi -lt $taskPartCount -and -not $setThickness;$pi++){
-            $taskPart=$null
-            try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
-            if($null -eq $taskPart){continue}
-            $taskPartName=''
-            try{$taskPartName=[string]$taskPart.Name}catch{}
-            if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
-
-            foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
-              try{
-                $taskPart.$propertyName=$thickness
-                $readBack=[double]$taskPart.$propertyName
-                if($readBack -eq $thickness){
-                  $setThickness=$propertyName
-                  break
-                }
-              }catch{}
-            }
-          }
-        }
-
-        if(-not $setThickness){
-          throw ('SigmaNEST task "'+[string]$task.Name+'" does not expose a writable thickness property on either Task or Task.PartsList. Requested='+$thickness+'.')
-        }
-      }
-
-      $matched=$true
     }
 
     if(-not $matched){
       throw ('Could not find CL part "'+$targetName+'" inside any SigmaNEST task after task creation.')
+    }
+
+    # Reacquire the COM task/part immediately before each mutation. SigmaNEST
+    # may rebuild the task tree when Task Setup data changes, invalidating
+    # previously returned COM interfaces.
+    if(-not [string]::IsNullOrWhiteSpace($material)){
+      $task=$null;$taskPart=$null
+      try{$task=$app.TasksList.Items($matchedTaskIndex)}catch{}
+      if($null -eq $task){throw ('Could not reacquire SigmaNEST task index '+$matchedTaskIndex+' for part "'+$targetName+'".')}
+      try{$taskPart=$task.PartsList.Items($matchedPartIndex)}catch{}
+      if($null -eq $taskPart){throw ('Could not reacquire SigmaNEST task-part index '+$matchedPartIndex+' for part "'+$targetName+'".')}
+
+      $setMaterial=$false
+      foreach($propertyName in @('Material','MaterialName','Mat')){
+        try{
+          $taskPart.$propertyName=$material
+          $readBack=[string]$taskPart.$propertyName
+          if($readBack.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
+            $setMaterial=$true
+            break
+          }
+        }catch{
+          if(SN-IsDisconnected $_){
+            throw ('SigmaNEST COM task-part disconnected while setting material property "'+$propertyName+'" for CL part "'+$targetName+'". HRESULT 0x80010108 (RPC_E_DISCONNECTED).')
+          }
+        }
+      }
+
+      if(-not $setMaterial){
+        throw ('SigmaNEST task-part for "'+$targetName+'" does not expose a writable material property. Tried: Material, MaterialName, Mat.')
+      }
+    }
+
+    if($null -ne $thickness){
+      $task=$null;$taskPart=$null
+      try{$task=$app.TasksList.Items($matchedTaskIndex)}catch{}
+      if($null -eq $task){throw ('Could not reacquire SigmaNEST task index '+$matchedTaskIndex+' for part "'+$targetName+'" before thickness update.')}
+      try{$taskPart=$task.PartsList.Items($matchedPartIndex)}catch{}
+      if($null -eq $taskPart){throw ('Could not reacquire SigmaNEST task-part index '+$matchedPartIndex+' for part "'+$targetName+'" before thickness update.')}
+
+      $setThickness=$false
+      foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
+        try{
+          $taskPart.$propertyName=$thickness
+          $readBack=[double]$taskPart.$propertyName
+          if($readBack -eq $thickness){
+            $setThickness=$true
+            break
+          }
+        }catch{
+          if(SN-IsDisconnected $_){
+            throw ('SigmaNEST COM task-part disconnected while setting thickness property "'+$propertyName+'" for CL part "'+$targetName+'". HRESULT 0x80010108 (RPC_E_DISCONNECTED).')
+          }
+        }
+      }
+
+      if(-not $setThickness){
+        throw ('SigmaNEST task-part for "'+$targetName+'" does not expose a writable thickness property. Tried: Thickness, SheetThickness, Thk, MaterialThickness.')
+      }
     }
   }
 }
@@ -250,7 +248,7 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
         }
 
         if(-not $set){
-          throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task="'+[string]$task.Name+'".')
+          throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task index='+$ti+'.')
         }
 
         $matched=$true
@@ -300,7 +298,7 @@ function Invoke-SigmaNestBuild($Request){
     $phase='APPLY_TASK_QUANTITIES';SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.1';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
-  }catch{return [pscustomobject]@{ok=$false;creatorVersion='DIRECT-COM-1.0';phase=$phase;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}}
+    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.2';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
+  }catch{return [pscustomobject]@{ok=$false;creatorVersion='DIRECT-COM-1.2';phase=$phase;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}}
   finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
 }
