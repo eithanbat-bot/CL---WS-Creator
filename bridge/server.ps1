@@ -780,6 +780,7 @@ function Write-BuildStatus($statusFile,$obj){
   ($obj|ConvertTo-Json -Depth 30)|Set-Content -LiteralPath $tmp -Encoding UTF8
   Move-Item -LiteralPath $tmp -Destination $statusFile -Force
 }
+
 function Get-BuildStatusPath([string]$jobId){
   if([string]::IsNullOrWhiteSpace($jobId)){throw 'Build job ID is required.'}
   if($jobId -notmatch '^[0-9a-fA-F-]{36}
@@ -1101,6 +1102,7 @@ while($true){
   if(-not $full.StartsWith(($rootFull.TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase)){throw 'Invalid build status path.'}
   return $full
 }
+
 function Start-SigmaNestBuildWorker($request){
   $statusDir=Join-Path $BridgeDir 'build-status'
   New-Item -ItemType Directory -Path $statusDir -Force|Out-Null
@@ -1110,11 +1112,13 @@ function Start-SigmaNestBuildWorker($request){
   $request.statusFile=$statusFile
   $request.jobId=$jobId
   ($request|ConvertTo-Json -Depth 30)|Set-Content -LiteralPath $requestFile -Encoding UTF8
+
   $worker=Join-Path $BridgeDir 'build-worker.ps1'
   if(-not(Test-Path -LiteralPath $worker)){
     Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
     throw 'SigmaNEST background worker is missing: '+$worker
   }
+
   $started=(Get-Date).ToUniversalTime()
   $initial=[ordered]@{
     jobId=$jobId
@@ -1133,8 +1137,10 @@ function Start-SigmaNestBuildWorker($request){
     selectedSheets=@($request.selectedSheets)
   }
   Write-BuildStatus -statusFile $statusFile -obj $initial
+
   $psExe=Join-Path $PSHOME 'powershell.exe'
   if(-not(Test-Path -LiteralPath $psExe)){$psExe=(Get-Command powershell.exe -ErrorAction Stop).Source}
+
   $psi=New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName=$psExe
   $psi.Arguments='-NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$requestFile+'"'
@@ -1143,6 +1149,7 @@ function Start-SigmaNestBuildWorker($request){
   $psi.CreateNoWindow=$true
   $psi.RedirectStandardOutput=$false
   $psi.RedirectStandardError=$false
+
   try{
     $proc=[Diagnostics.Process]::Start($psi)
     $initial.pid=$proc.Id
@@ -1154,13 +1161,29 @@ function Start-SigmaNestBuildWorker($request){
     Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
     throw ('Could not start SigmaNEST background worker: '+$_.Exception.Message)
   }
-  [pscustomobject]@{jobId=$jobId;statusFile=$statusFile;requestFile=$requestFile;pid=$proc.Id;started=$started.ToString('o')}
+
+  [pscustomobject]@{
+    jobId=$jobId
+    statusFile=$statusFile
+    requestFile=$requestFile
+    pid=$proc.Id
+    started=$started.ToString('o')
+  }
 }
+
 function Read-BuildStatus([string]$jobId){
   $statusFile=Get-BuildStatusPath -jobId $jobId
   if(-not(Test-Path -LiteralPath $statusFile)){return $null}
-  try{return (Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json)}
-  catch{return [pscustomobject]@{jobId=$jobId;state='RUNNING';phase='STATUS_READ';message='Build status is being written; retry shortly.'}}
+  try{
+    return (Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json)
+  }catch{
+    return [pscustomobject]@{
+      jobId=$jobId
+      state='RUNNING'
+      phase='STATUS_READ'
+      message='Build status is being written; retry shortly.'
+    }
+  }
 }
 
 function Handle-Request($req){
