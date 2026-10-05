@@ -782,7 +782,102 @@ function Write-BuildStatus($statusFile,$obj){
 
 function Get-BuildStatusPath([string]$jobId){
   if([string]::IsNullOrWhiteSpace($jobId)){throw 'Build job ID is required.'}
-  if($jobId -notmatch '^[0-9a-fA-F-]{36}
+  if($jobId -notmatch '^[0-9a-fA-F-]{36}$'){throw 'Invalid build job ID.'}
+  $dir=Join-Path $BridgeDir 'build-status'
+  $path=Join-Path $dir ($jobId+'.json')
+  $full=[IO.Path]::GetFullPath($path)
+  $rootFull=[IO.Path]::GetFullPath($dir)
+  if(-not $full.StartsWith(($rootFull.TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase)){
+    throw 'Invalid build status path.'
+  }
+  return $full
+}
+
+function Start-SigmaNestBuildWorker($request){
+  $statusDir=Join-Path $BridgeDir 'build-status'
+  New-Item -ItemType Directory -Path $statusDir -Force|Out-Null
+  $jobId=[Guid]::NewGuid().ToString()
+  $statusFile=Get-BuildStatusPath -jobId $jobId
+  $requestFile=Join-Path $statusDir ($jobId+'.request.json')
+
+  $request.statusFile=$statusFile
+  $request.jobId=$jobId
+  ($request|ConvertTo-Json -Depth 30)|Set-Content -LiteralPath $requestFile -Encoding UTF8
+
+  $worker=Join-Path $BridgeDir 'build-worker.ps1'
+  if(-not(Test-Path -LiteralPath $worker)){
+    Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
+    throw 'SigmaNEST background worker is missing: '+$worker
+  }
+
+  $started=(Get-Date).ToUniversalTime()
+  $initial=[ordered]@{
+    jobId=$jobId
+    state='STARTING'
+    phase='QUEUED'
+    message='SigmaNEST build accepted and queued.'
+    workerVersion='2.11.1'
+    pid=$null
+    started=$started.ToString('o')
+    finished=$null
+    elapsedSeconds=0
+    result=$null
+    parts=@($request.reportParts)
+    outputDir=[string]$request.outputDir
+    jobName=[string]$request.jobName
+    selectedSheets=@($request.selectedSheets)
+  }
+  Write-BuildStatus -statusFile $statusFile -obj $initial
+
+  $psExe=Join-Path $PSHOME 'powershell.exe'
+  if(-not(Test-Path -LiteralPath $psExe)){$psExe=(Get-Command powershell.exe -ErrorAction Stop).Source}
+
+  $psi=New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName=$psExe
+  $psi.Arguments='-NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$requestFile+'"'
+  $psi.WorkingDirectory=$BridgeDir
+  $psi.UseShellExecute=$false
+  $psi.CreateNoWindow=$true
+  $psi.RedirectStandardOutput=$false
+  $psi.RedirectStandardError=$false
+
+  try{
+    $proc=[Diagnostics.Process]::Start($psi)
+    $initial.pid=$proc.Id
+    $initial.state='RUNNING'
+    $initial.phase='STARTING'
+    $initial.message='SigmaNEST background worker is running.'
+    Write-BuildStatus -statusFile $statusFile -obj $initial
+  }catch{
+    Remove-Item -LiteralPath $requestFile -Force -ErrorAction SilentlyContinue
+    throw ('Could not start SigmaNEST background worker: '+$_.Exception.Message)
+  }
+
+  [pscustomobject]@{
+    jobId=$jobId
+    statusFile=$statusFile
+    requestFile=$requestFile
+    pid=$proc.Id
+    started=$started.ToString('o')
+  }
+}
+
+function Read-BuildStatus([string]$jobId){
+  $statusFile=Get-BuildStatusPath -jobId $jobId
+  if(-not(Test-Path -LiteralPath $statusFile)){return $null}
+  try{
+    return (Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json)
+  }catch{
+    return [pscustomobject]@{
+      jobId=$jobId
+      state='RUNNING'
+      phase='STATUS_READ'
+      message='Build status is being written; retry shortly.'
+    }
+  }
+}
+
+function Handle-Request($req){
   if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
   if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
     return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG['libraryRoot'];dxfRoot=$CFG['dxfRoot'];lastScan=$CFG['lastScan'];count=[int]$CFG['count'];discoveredFiles=[int]$CFG['discoveredFiles'];prsCount=[int]$CFG['prsCount'];dxfCount=[int]$CFG['dxfCount'];dxfIndexState=[string]$CFG['dxfIndexState'];dxfIndexMessage=[string]$CFG['dxfIndexMessage'];sigmaNestCom=$true;bridge='PowerShell'}}
@@ -1055,7 +1150,16 @@ function Get-BuildStatusPath([string]$jobId){
       }
     }
   }
-  if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})
+
+  if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
+    $jobId=$Matches[1]
+    $status=Read-BuildStatus -jobId $jobId
+    if($null -eq $status){
+      return [pscustomobject]@{Status=404;Data=@{error='Build job not found.';jobId=$jobId}}
+    }
+    return [pscustomobject]@{Status=200;Data=$status}
+  }
+  [pscustomobject]@{Status=404;Data=@{error='Not found'}}
 }
 
 $listener = New-Object -TypeName Net.Sockets.TcpListener -ArgumentList ([Net.IPAddress]::Loopback,$PORT)
