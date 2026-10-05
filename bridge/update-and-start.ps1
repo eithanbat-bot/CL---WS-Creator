@@ -132,7 +132,7 @@ try{
     if($ext -eq '.xml' -and -not(Test-Xml $validationStage)){throw "Downloaded $($entry.relative) failed XML validation."}
   }
 
-  $remoteServer=Join-Path $tmpRoot 'stage-server.ps1'
+  $remoteServer=Join-Path $remoteBridge 'server.ps1'
   if(-not(Test-Path -LiteralPath $remoteServer)){throw 'GitHub bridge does not contain server.ps1.'}
   $remoteVersion=Get-Version $remoteServer
   if($remoteVersion -eq 'unknown' -or $remoteVersion -eq 'none'){throw 'GitHub server.ps1 does not publish a bridge version.'}
@@ -141,7 +141,7 @@ try{
   $install=@()
   foreach($entry in $entries){
     $local=Join-Path $BridgeDir $entry.relative
-    $stage=[string]$entry.stage
+    $stage=[string]$entry.source
     if((Get-Hash $stage) -ne (Get-Hash $local)){
       $install+=[pscustomobject]@{Stage=[string]$entry.source;Local=$local;Relative=$entry.relative}
     }
