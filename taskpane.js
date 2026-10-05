@@ -509,14 +509,14 @@ async function runAction(endpoint,body,actionName){
 async function importGeometry(){
   var btn=$('importGeometry');btn.disabled=true;
   try{
-    var dxfRoot=$('dxfPath').value.trim()||'Y:\';
+    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
     var ds=await bridge('/api/dxf-status',{timeoutMs:4000});
     if(String(ds.root||'').toUpperCase()===String(dxfRoot).toUpperCase()&&String(ds.state||'').toUpperCase()!=='COMPLETE'){
       throw new Error('DXF index is not complete yet. '+(ds.filesFound||0)+' DXFs indexed so far.');
     }
     var parts=lastActionParts.length?lastActionParts:await readCL();
     var selectedNames=selectedSheets().map(function(x){return x.name});
-    var prsRoot=$('libraryPath').value.trim()||'S:\SNDataX1\PARTS';
+    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
     updateWorkspacePath('');
     var result=await runAction('/api/import-geometry',{prsRoot:prsRoot,dxfRoot:dxfRoot,jobName:job,selectedSheetNames:selectedNames,parts:parts},'Import Geometry');
@@ -532,7 +532,7 @@ async function autoTaskOrder(){
     if(!currentWsPath)throw new Error('Import Geometry first or enter the path of an existing SigmaNEST .ws.');
     var parts=await readCL();
     var selectedNames=selectedSheets().map(function(x){return x.name});
-    var prsRoot=$('libraryPath').value.trim()||'S:\SNDataX1\PARTS';
+    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
     await runAction('/api/autotask-label',{prsRoot:prsRoot,wsPath:currentWsPath,jobName:job,selectedSheetNames:selectedNames,parts:parts},'AutoTask + Order Label');
   }catch(e){
