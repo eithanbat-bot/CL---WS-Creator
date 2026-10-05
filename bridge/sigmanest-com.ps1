@@ -611,6 +611,10 @@ function SN-Try-ImportPRS-WithSettings($app,[string]$sourcePath,$clData){
       $diagnostics+='SNPartExportImport has no accessible PartImportSettings/ImportSettings/Settings object.'
     }
   }
+  if($null -ne $adapter){
+    try{$diagnostics+='Adapter methods: '+((SN-ComMethodNames $adapter) -join ', ')}catch{}
+    try{$diagnostics+='Adapter properties: '+((SN-ComPropertyNames $adapter) -join ', ')}catch{}
+  }
   try{if($adapter){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($adapter)}}catch{}
   return [pscustomobject]@{ok=$false;diagnostics=$diagnostics}
 }
