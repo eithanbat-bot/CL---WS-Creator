@@ -318,21 +318,6 @@ function SN-Verify-PartIdentity($partObj,$targetName,$sourcePath=''){
   if($sourceNorm -and $id.normalizedDrawing -eq $sourceNorm){return $true}
   return $false
 }
-function SN-Notify-PartRecordUpdated($setInfo){
-  if($null -eq $setInfo){return $false}
-  $obj=$setInfo.object
-  if($null -eq $obj){return $false}
-  try{
-    $methods=@(SN-ComMethodNames $obj)
-    if($methods -contains 'UpdatePartFileLoaded'){
-      $obj.UpdatePartFileLoaded()
-      return $true
-    }
-  }catch{
-    if(SN-IsDisconnected $_){throw}
-  }
-  return $false
-}
 function SN-Apply-WorkspacePartData($app,$requestParts){
   $updated=@()
   $usedIndices=@()
@@ -511,16 +496,145 @@ function SN-Get-NewPart($app,$beforeCount,[string]$label){
   throw ('SigmaNEST added "'+$label+'" but the new PartsList item could not be accessed. PartsList.Count='+$afterCount)
 }
 
-function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType){
+function SN-Try-SetImportSetting($settings,[string[]]$aliases,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
+  if($null -eq $settings){return $null}
+  foreach($prop in @(SN-ComPropertyNames $settings)){
+    if(-not (SN-FieldNameMatches -name $prop -aliases $aliases)){continue}
+    try{
+      $settings.$prop=$value
+      if($expectedText -ne ''){
+        if(([string]$settings.$prop).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $prop}
+      }elseif(-not [double]::IsNaN($expectedNumber)){
+        $n=SN-Scalar-Number -value $settings.$prop -default ([double]::NaN)
+        if(-not [double]::IsNaN([double]$n) -and [double]$n -eq $expectedNumber){return $prop}
+      }elseif($expectedInt -ne -2147483648){
+        $n=SN-Scalar-Int -value $settings.$prop -default -2147483648
+        if($n -eq $expectedInt){return $prop}
+      }else{return $prop}
+    }catch{}
+    try{
+      $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::SetProperty,$null,$settings,@($value))|Out-Null
+      if($expectedText -ne ''){
+        $back=[string]$settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@())
+        if($back.Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $prop}
+      }elseif(-not [double]::IsNaN($expectedNumber)){
+        $back=SN-Scalar-Number -value $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@()) -default ([double]::NaN)
+        if(-not [double]::IsNaN([double]$back) -and [double]$back -eq $expectedNumber){return $prop}
+      }elseif($expectedInt -ne -2147483648){
+        $back=SN-Scalar-Int -value $settings.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$settings,@()) -default -2147483648
+        if($back -eq $expectedInt){return $prop}
+      }else{return $prop}
+    }catch{}
+  }
+  return $null
+}
+function SN-Get-ImportSettings($adapter){
+  if($null -ne $adapter){
+    foreach($prop in @('PartImportSettings','ImportSettings','Settings')){
+      try{
+        $v=$adapter.$prop
+        if($null -ne $v){return [pscustomobject]@{settings=$v;property=$prop}}
+      }catch{}
+    }
+  }
+  foreach($progId in @('SigmaNEST.SNPartImportSettings','SigmaNEST.SNPartImportSetting')){
+    try{
+      $v=New-Object -ComObject $progId -ErrorAction Stop
+      if($null -ne $v){return [pscustomobject]@{settings=$v;property=$progId}}
+    }catch{}
+  }
+  return $null
+}
+function SN-Configure-PRS-ImportSettings($settings,$clData){
+  $material=[string]$clData.sigmaMaterial
+  $thickness=SN-Scalar-Number -value $clData.thicknessMm -default ([double]::NaN)
+  $qty=SN-Scalar-Int -value $clData.qty -default 1
+  if($qty -lt 1){$qty=1}
+  $result=[ordered]@{material='';thickness='';quantity='';warnings=@()}
+  if(-not [string]::IsNullOrWhiteSpace($material)){
+    $result.material=SN-Try-SetImportSetting -settings $settings -aliases @('Material','MaterialName','Mat','MatName','MaterialType','MaterialString') -value $material -expectedText $material
+  }
+  if(-not [double]::IsNaN($thickness)){
+    $result.thickness=SN-Try-SetImportSetting -settings $settings -aliases @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -value $thickness -expectedNumber $thickness
+  }
+  $result.quantity=SN-Try-SetImportSetting -settings $settings -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','NumberToNest','NumberToLoad','BatchQuantity') -value $qty -expectedInt $qty
+  if([string]::IsNullOrWhiteSpace([string]$result.material)){ $result.warnings+='Import settings did not expose a verified material field.' }
+  if([double]::IsNaN($thickness) -eq $false -and [string]::IsNullOrWhiteSpace([string]$result.thickness)){ $result.warnings+='Import settings did not expose a verified thickness field.' }
+  if([string]::IsNullOrWhiteSpace([string]$result.quantity)){ $result.warnings+='Import settings did not expose a verified quantity field.' }
+  return [pscustomobject]$result
+}
+function SN-Try-ImportPRS-WithSettings($app,[string]$sourcePath,$clData){
+  $before=SN-Parts-Count $app
+  $adapter=$null
+  $diagnostics=@()
+  try{$adapter=New-Object -ComObject SigmaNEST.SNPartExportImport -ErrorAction Stop}catch{
+    $diagnostics+='SNPartExportImport unavailable: '+(SN-ErrorText $_)
+  }
+  if($null -ne $adapter){
+    $info=SN-Get-ImportSettings -adapter $adapter
+    if($info){
+      $cfg=SN-Configure-PRS-ImportSettings -settings $info.settings -clData $clData
+      if($cfg.warnings.Count -eq 0){
+        foreach($methodName in @('ImportPartWithFeedback','ImportPart2','ImportPart','ImportAsParts')){
+          $members=@(SN-ComMethodNames $adapter)
+          if($members -notcontains $methodName){continue}
+          foreach($args in @(
+            @([string]$sourcePath,$info.settings),
+            @([string]$sourcePath,$info.settings,$false),
+            @([string]$sourcePath)
+          )){
+            try{
+              $result=SN-Invoke-ComMethod -obj $adapter -name $methodName -args $args
+              Start-Sleep -Milliseconds 150
+              $after=SN-Parts-Count $app
+              if($after -gt $before){
+                return [pscustomobject]@{ok=$true;method=('SNPartExportImport.'+$methodName);settings=$cfg}
+              }
+              if($result -is [System.Object[]]){
+                $result=@($result|Where-Object {$null -ne $_})[0]
+              }
+              if($result -and $result.PSObject.Properties.Name -contains 'Part'){
+                try{
+                  $part=$result.Part
+                  if($null -ne $part){return [pscustomobject]@{ok=$true;method=('SNPartExportImport.'+$methodName);settings=$cfg;pendingPart=$part}}
+                }catch{}
+              }
+            }catch{
+              $diagnostics+=($methodName+' '+$args.Count+' args: '+(SN-ErrorText $_))
+            }
+          }
+        }
+      }else{
+        $diagnostics+=($cfg.warnings -join ' ')
+      }
+    }else{
+      $diagnostics+='SNPartExportImport has no accessible PartImportSettings/ImportSettings/Settings object.'
+    }
+  }
+  try{if($adapter){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($adapter)}}catch{}
+  return [pscustomobject]@{ok=$false;diagnostics=$diagnostics}
+}
+function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=$null){
   if(-not(Test-Path -LiteralPath $sourcePath)){throw ('Geometry not found: '+$sourcePath)}
   $label=[IO.Path]::GetFileName($sourcePath)
   $errors=@()
+
+  if($sourceType -eq 'PRS' -and $null -ne $clData){
+    $prsTry=SN-Try-ImportPRS-WithSettings -app $app -sourcePath $sourcePath -clData $clData
+    if($prsTry.ok){
+      return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType=$sourceType;method=$prsTry.method;preImportSettings=$prsTry.settings}
+    }
+    if($prsTry.diagnostics.Count){$errors+=($prsTry.diagnostics -join ' | ')}
+  }
+
   try{
-    # Load the geometry into SigmaNEST's pending/new-parts collection.
-    # CreatePartsListForNewPartsInWS is intentionally NOT called here:
-    # invoking it once per part is extremely expensive for large CLs.
-    [void]$app.LoadPart([string]$sourcePath)
-    return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType=$sourceType;method='LoadPart'}
+    # LoadPart is retained as a geometry-loader fallback for DXF and for
+    # installations where PRS import is known to work. PRS is NOT allowed
+    # to fall through silently when CL import-time settings were unavailable.
+    if($sourceType -ne 'PRS'){
+      [void]$app.LoadPart([string]$sourcePath)
+      return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType=$sourceType;method='LoadPart'}
+    }
   }catch{
     $errors+=('LoadPart: '+(SN-ErrorText $_))
   }
@@ -541,6 +655,9 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType){
     }
   }
 
+  if($sourceType -eq 'PRS'){
+    throw ('SigmaNEST could not perform a verified CL-data PRS import for "'+$label+'". The PRS was NOT imported because its original material/thickness/quantity cannot be safely accepted as production data. '+($errors -join ' | '))
+  }
   throw ('SigmaNEST could not load "'+$label+'". '+($errors -join ' | '))
 }
 
@@ -773,7 +890,12 @@ function Invoke-SigmaNestImportGeometry($Request){
       $source=[string]$x.sourcePath
       if([string]::IsNullOrWhiteSpace($source)){$source=[string]$x.prsPath}
       if([string]::IsNullOrWhiteSpace($source)){continue}
-      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType)
+      $clData=[pscustomobject]@{
+        sigmaMaterial=[string]$x.sigmaMaterial
+        thicknessMm=$x.thicknessMm
+        qty=$x.qty
+      }
+      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData $clData
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
       $workspaceIndex=$before+$queuedIndex
