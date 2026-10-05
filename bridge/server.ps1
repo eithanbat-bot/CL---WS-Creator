@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.12.0'
+$BRIDGE_VERSION = '2.12.1'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -170,7 +170,9 @@ function Material-Equal([string]$a,[string]$b,[string]$aThickness='',[string]$bT
 }
 
 function Sigma-Material([string]$cl,[string]$lib){
-  $s=Normalize-Material -s ([string]$(if($lib){$lib}else{$cl}))
+  # CL material is authoritative for the generated workspace. Library material is fallback only.
+  $source=[string]$(if(-not [string]::IsNullOrWhiteSpace([string]$cl)){$cl}else{$lib})
+  $s=Normalize-Material -s $source
   $s=$s -replace '^\d+(?:\.\d+)?\s*mm\s*',''
   $s=$s -replace '\s+(sheet|plate)$',''
   $s.Trim()
@@ -807,7 +809,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.12.0'
+    workerVersion='2.12.1'
     pid=$null
     started=$started.ToString('o')
     finished=$null
