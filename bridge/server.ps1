@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.9.7'
+$BRIDGE_VERSION = '2.10.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -12,6 +12,11 @@ $DXF_INDEX_FILE = Join-Path $ROOT 'dxf-index.json'
 $DXF_INDEX_DIR = Join-Path $ROOT 'dxf-index'
 $DXF_STATUS_FILE = Join-Path $ROOT 'dxf-index-status.json'
 $DXF_SCAN_SCRIPT = Join-Path $ROOT 'dxf-indexer.ps1'
+$SN_COM_LIBRARY = Join-Path $ROOT 'sigmanest-com.ps1'
+if(-not(Test-Path -LiteralPath $SN_COM_LIBRARY)){
+  throw ('SigmaNEST COM library is missing: '+$SN_COM_LIBRARY)
+}
+. $SN_COM_LIBRARY
 $CFG = [ordered]@{ libraryRoot=$DEFAULT_LIBRARY; dxfRoot=$DEFAULT_DXF_LIBRARY; lastScan=$null; count=0; discoveredFiles=0; prsCount=0; dxfCount=0; dxfIndexState='IDLE'; dxfIndexMessage=''; scanErrors=@(); inspectErrors=@(); dxfWorkers=12; dxfNightlyHour=2; dxfRefreshHours=24; dxfAutoRefresh=$true }
 
 try {
@@ -980,125 +985,26 @@ function Handle-Request($req){
     }
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
-      $worker=Join-Path $BridgeDir 'create-sigmanest-ws.ps1'
-      # Stage the creator script and request locally. This removes mapped-drive
-      # dependencies from PowerShell script startup and COM initialization.
-      $tempRoot=Join-Path ([IO.Path]::GetTempPath()) 'CL-WS-Creator'
-      $runDir=Join-Path $tempRoot ([Guid]::NewGuid().ToString('N'))
-      New-Item -ItemType Directory -Path $runDir -Force|Out-Null
-      $localWorker=Join-Path $runDir 'create-sigmanest-ws.ps1'
-      $localRequest=Join-Path $runDir 'request.json'
-      $localResult=Join-Path $runDir 'result.json'
+      $data=Invoke-SigmaNestBuild -Request $request
       $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
       $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
       $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
-      Copy-Item -LiteralPath $worker -Destination $localWorker -Force
-      Copy-Item -LiteralPath $reqFile -Destination $localRequest -Force
 
-      # Parse the exact staged creator before starting a child PowerShell.
-      # This turns a silent exit code 1 into an actionable parser diagnostic.
-      $parseTokens=$null
-      $parseErrors=$null
-      [System.Management.Automation.Language.Parser]::ParseFile(
-        $localWorker,[ref]$parseTokens,[ref]$parseErrors
-      )|Out-Null
-      if($parseErrors -and $parseErrors.Count -gt 0){
-        $parseText=($parseErrors|ForEach-Object{
-          'Line '+$_.Extent.StartLineNumber+': '+$_.Message
-        }) -join ' | '
-        [ordered]@{
-          ok=$false
-          phase='CREATOR_PARSE'
-          exitCode=2
-          worker=$worker
-          localWorker=$localWorker
-          parseErrors=@($parseText)
-          message='The staged SigmaNEST creator has PowerShell parser errors.'
-        }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $creatorResult -Encoding UTF8
-        throw ('SigmaNEST creator parser check failed: '+$parseText)
+      if($data){
+        ($data|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $creatorOut -Encoding UTF8
+        [string]::Empty|Set-Content -LiteralPath $creatorErr -Encoding UTF8
+        ($data|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $creatorResult -Encoding UTF8
       }
 
-      # The bridge is launched in STA mode so SigmaNEST COM runs in the
-      # correct apartment. Invoke the creator in this process instead of
-      # crossing another PowerShell process boundary.
-      $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
-      $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
-      $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
-      # Create a sentinel before invoking the creator. The creator itself
-      # overwrites this with STARTUP diagnostics as its first executable action.
-      [ordered]@{
-        ok=$false
-        phase='INVOKE_PRE'
-        bridgeVersion=$BRIDGE_VERSION
-        creatorVersion='3.5.0'
-        localWorker=$localWorker
-        localRequest=$localRequest
-        localResult=$localResult
-        message='Bridge reached the creator invocation point; waiting for creator startup.'
-      }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $localResult -Encoding UTF8
-
-      try{
-        $invokeOutput=& $localWorker -RequestFile $localRequest -ResultFile $localResult 2>&1
-        @($invokeOutput|ForEach-Object{[string]$_})|Set-Content -LiteralPath $creatorOut -Encoding UTF8
-      }catch{
-        [string]$_.Exception.ToString()|Set-Content -LiteralPath $creatorErr -Encoding UTF8
-        try{
-          [ordered]@{
-            ok=$false
-            phase='INVOKE_CATCH'
-            bridgeVersion=$BRIDGE_VERSION
-            creatorVersion='3.5.0'
-            error=$_.Exception.ToString()
-            localWorker=$localWorker
-            localRequest=$localRequest
-            localResult=$localResult
-          }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $localResult -Encoding UTF8
-        }catch{}
-        throw
+      if($null -eq $data){
+        throw 'Direct SigmaNEST COM routine returned no result.'
       }
-
-      $rawText=''
-      $errText=''
-      $localResultExists=Test-Path -LiteralPath $localResult
-      $localResultLength=0
-      if($localResultExists){
-        try{$localResultLength=[int64](Get-Item -LiteralPath $localResult).Length}catch{}
-        try{$rawText=[string](Get-Content -LiteralPath $localResult -Raw -Encoding UTF8).Trim()}catch{}
-        try{Copy-Item -LiteralPath $localResult -Destination $creatorResult -Force}catch{}
-      }
-      if([string]::IsNullOrWhiteSpace($rawText) -or $rawText -match 'INVOKE_PRE'){
-        $detail='SigmaNEST creator returned no usable result from the in-process STA invocation.'
-        $detail+=' localResultExists='+$localResultExists+' localResultBytes='+$localResultLength
-        $invokeText=''
-        try{$invokeText=(@($invokeOutput)|ForEach-Object{[string]$_}) -join ' || '}catch{}
-        $detail+=' invokeOutput='+$invokeText
-        if(Test-Path -LiteralPath $creatorErr){
-          $errText=[string](Get-Content -LiteralPath $creatorErr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue).Trim()
-          if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' ERROR: '+$errText}
-        }
-        if(-not (Test-Path -LiteralPath $creatorResult)){
-          [ordered]@{
-            ok=$false
-            phase='CREATOR_IN_PROCESS'
-            creatorVersion='3.5.0'
-            worker=$worker
-            localWorker=$localWorker
-            localRequest=$localRequest
-            localResult=$localResult
-            error=$detail
-          }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $creatorResult -Encoding UTF8
-        }
-        throw ($detail+' Creator output files: '+$creatorOut+' ; '+$creatorErr+' ; '+$creatorResult)
-      }
-
-      try{$data=$rawText|ConvertFrom-Json}catch{
-        throw ('SigmaNEST creator returned invalid JSON from the STA invocation: '+$_.Exception.Message)
-      }
-      if($null -eq $data){throw 'SigmaNEST creator returned no result from the STA invocation.'}
       if(-not [bool]$data.ok){
-        $creatorError=[string]$data.error
-        if([string]::IsNullOrWhiteSpace($creatorError)){$creatorError='SigmaNEST creator failed in the STA invocation.'}
-        throw $creatorError
+        $phase=[string]$data.phase
+        $errorText=[string]$data.error
+        if([string]::IsNullOrWhiteSpace($phase)){$phase='UNKNOWN'}
+        if([string]::IsNullOrWhiteSpace($errorText)){$errorText='Unknown SigmaNEST COM error.'}
+        throw ('SigmaNEST direct COM build failed at '+$phase+': '+$errorText)
       }
 
       $taskPlan=@()
