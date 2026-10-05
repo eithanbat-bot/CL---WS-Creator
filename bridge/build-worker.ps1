@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.11.2'
+$WorkerVersion='2.11.3'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
@@ -70,6 +70,28 @@ try{
   $request.outputDir=[string]$prepared.outputDir
   $request.jobName=[string]$prepared.jobName
   $request.selectedSheets=@($prepared.selectedSheets)
+
+  Write-BuildStatus $statusFile ([ordered]@{
+    jobId=[string]$request.jobId
+    state='RUNNING'
+    phase='PREPARED'
+    message=[string]$prepared.message
+    workerVersion=$WorkerVersion
+    pid=$PID
+    started=$started.ToString('o')
+    finished=$null
+    elapsedSeconds=((Get-Date).ToUniversalTime()-$started).TotalSeconds
+    result=$prepared
+    parts=@($prepared.parts)
+    outputDir=[string]$prepared.outputDir
+    jobName=[string]$prepared.jobName
+    selectedSheets=@($prepared.selectedSheets)
+    reviewCount=[int]$prepared.reviewCount
+    reviewBreakdown=$prepared.reviewBreakdown
+    importedCount=0
+    missingCount=[int]$prepared.missingCount
+    wsPath=''
+  })
 
   if($prepared.noGeometry){
     $finished=(Get-Date).ToUniversalTime()
