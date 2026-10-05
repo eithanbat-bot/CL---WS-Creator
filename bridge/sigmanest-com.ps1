@@ -160,8 +160,8 @@ function SN-Try-InvokeGetter($obj,[string]$name){
     if($m){
       $method=$m
       $params=@()
-      if($method.Definition -notmatch '\\([^)]*\\)'){return $null}
-      if($method.Definition -match '\\([^)]*[^\\s()]([^)]*)\\)' -and $Matches[1].Trim()){return $null}
+      if($method.Definition -notmatch '\([^)]*\)'){return $null}
+      if($method.Definition -match '\([^)]*[^\s()]([^)]*)\)' -and $Matches[1].Trim()){return $null}
       return $obj.$name()
     }
   }catch{}
