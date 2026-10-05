@@ -1110,43 +1110,17 @@ function Handle-Request($req){
   if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
     if($null -eq $b){throw 'Build request body is required.'}
-    $workerRequest=[pscustomobject]@{
-      jobId=''
-      statusFile=''
-      mode='FULL'
-      jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
-      outputDir=''
-      selectedSheets=@($b.selectedSheetNames)
-      reportParts=@($b.parts)
-      buildRequest=$b
-    }
+    $workerRequest=[pscustomobject]@{jobId='';statusFile='';mode='FULL';jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'});outputDir='';selectedSheets=@($b.selectedSheetNames);reportParts=@($b.parts);buildRequest=$b}
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-    return [pscustomobject]@{Status=202;Data=@{
-      accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started
-      outputDir='';message='Full SigmaNEST build accepted in the background.'
-    }}
+    return [pscustomobject]@{Status=202;Data=@{accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started;outputDir='';message='Full SigmaNEST build accepted in the background.'}}
   }
-
   if($req.Path -eq '/api/import-geometry' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
     if($null -eq $b){throw 'Import request body is required.'}
-    $workerRequest=[pscustomobject]@{
-      jobId=''
-      statusFile=''
-      mode='IMPORT_ONLY'
-      jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
-      outputDir=''
-      selectedSheets=@($b.selectedSheetNames)
-      reportParts=@($b.parts)
-      buildRequest=$b
-    }
+    $workerRequest=[pscustomobject]@{jobId='';statusFile='';mode='IMPORT_ONLY';jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'});outputDir='';selectedSheets=@($b.selectedSheetNames);reportParts=@($b.parts);buildRequest=$b}
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-    return [pscustomobject]@{Status=202;Data=@{
-      accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started
-      outputDir='';message='Geometry import accepted. SigmaNEST tasks will not be created by this action.'
-    }}
+    return [pscustomobject]@{Status=202;Data=@{accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started;outputDir='';message='Geometry import accepted. SigmaNEST tasks will not be created by this action.'}}
   }
-
   if($req.Path -eq '/api/autotask-label' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
     if($null -eq $b){throw 'AutoTask request body is required.'}
@@ -1168,13 +1142,8 @@ function Handle-Request($req){
       }
     }
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-    return [pscustomobject]@{Status=202;Data=@{
-      accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started
-      outputDir=(Split-Path -Parent $ws);wsPath=$ws
-      message='AutoTask/order-label operation accepted in the background.'
-    }}
+    return [pscustomobject]@{Status=202;Data=@{accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started;outputDir=(Split-Path -Parent $ws);wsPath=$ws;message='AutoTask/order-label operation accepted in the background.'}}
   }
-
   if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
     $jobId=$Matches[1]
     $status=Read-BuildStatus -jobId $jobId
