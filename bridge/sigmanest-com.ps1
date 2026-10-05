@@ -56,40 +56,39 @@ function SN-Get-NewPart($app,[int]$beforeCount,[string]$label){
   throw ('SigmaNEST added "'+$label+'" but the new PartsList item could not be accessed. PartsList.Count='+$afterCount)
 }
 
-function SN-Add-Geometry($app,[string]$sourcePath,[string]$sourceType){
+function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType){
   if(-not(Test-Path -LiteralPath $sourcePath)){throw ('Geometry not found: '+$sourcePath)}
   $label=[IO.Path]::GetFileName($sourcePath)
-  $before=SN-Parts-Count $app
   $errors=@()
   try{
-    # Verified SigmaNEST X1.4 interface: SNApp.LoadPart(string).
-    # Do not use Type.InvokeMember here; it binds the COM method incorrectly
-    # on this installation and reports a parameter-count mismatch.
+    # Load the geometry into SigmaNEST's pending/new-parts collection.
+    # CreatePartsListForNewPartsInWS is intentionally NOT called here:
+    # invoking it once per part is extremely expensive for large CLs.
     [void]$app.LoadPart([string]$sourcePath)
-    try{$app.CreatePartsListForNewPartsInWS()}catch{}
-    if((SN-Parts-Count $app) -gt $before){
-      return SN-Get-NewPart $app $before $label
-    }
-    $errors+='LoadPart did not add a part to PartsList'
-  }catch{$errors+=('LoadPart: '+$_.Exception.Message)}
+    return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType=$sourceType;method='LoadPart'}
+  }catch{
+    $errors+=('LoadPart: '+(SN-ErrorText $_))
+  }
+
   if($sourceType -eq 'DXF'){
     try{
       $settings=$null;try{$settings=New-Object -ComObject SigmaNEST.SNPartImportSettings}catch{}
       foreach($importId in @(0,1,2,3)){
-        $beforeTry=SN-Parts-Count $app
         try{
           $result=SN-Invoke-ComMethod $app.PartsList 'Import' @([string]$sourcePath,[int]$importId,$settings)
-          Start-Sleep -Milliseconds 150
-          try{SN-Invoke-ComMethod $app 'CreatePartsListForNewPartsInWS' @()|Out-Null}catch{}
-          $afterTry=SN-Parts-Count $app
-          if($afterTry -gt $beforeTry){return SN-Get-NewPart $app $before $label}
-          if($result -ne $null -and [bool]$result){$afterTry=SN-Parts-Count $app;if($afterTry -gt $beforeTry){return SN-Get-NewPart $app $before $label}}
-        }catch{$errors+=('PartsList.Import id '+$importId+': '+$_.Exception.Message)}
+          return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType=$sourceType;method=('PartsList.Import '+$importId)}
+        }catch{
+          $errors+=('PartsList.Import id '+$importId+': '+(SN-ErrorText $_))
+        }
       }
-    }catch{$errors+=('DXF import fallback: '+$_.Exception.Message)}
+    }catch{
+      $errors+=('DXF import fallback: '+(SN-ErrorText $_))
+    }
   }
-  throw ('SigmaNEST could not import "'+$label+'". '+($errors -join ' | '))
+
+  throw ('SigmaNEST could not load "'+$label+'". '+($errors -join ' | '))
 }
+
 
 function SN-Set-TaskMaterialAndThickness($app,$requestParts){
   $taskCount=0
@@ -278,20 +277,47 @@ function Invoke-SigmaNestBuild($Request){
     $safe=($job -replace '[^A-Za-z0-9._ -]','_').Trim();if([string]::IsNullOrWhiteSpace($safe)){$safe='CL_JOB'}
     $wsPath=Join-Path -Path $wsDir -ChildPath ($safe+'.ws');if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
     $phase='CONFIGURE_LIBRARY';try{$app.PartsLibrary.Directory=[string]$Request.libraryRoot}catch{}
-    $phase='IMPORT_PARTS';$created=@()
+    $phase='IMPORT_PARTS';$created=@();$queued=@()
+    $beforeParts=SN-Parts-Count $app
     foreach($x in @($Request.parts)){
       $sourcePath=[string]$x.sourcePath;$sourceType=[string]$x.sourceType
       if([string]::IsNullOrWhiteSpace($sourcePath)){$sourcePath=[string]$x.prsPath;if(-not $sourceType){$sourceType='PRS'}}
       if([string]::IsNullOrWhiteSpace($sourcePath)){continue}
-      $part=SN-Add-Geometry $app $sourcePath $sourceType
+
+      $load=SN-Queue-Geometry -app $app -sourcePath $sourcePath -sourceType $sourceType
       $quantity=[int][math]::Round([double]$x.qty);if($quantity -lt 1){$quantity=1}
-      # Workspace ISNPartObj quantity is not the production/work-order quantity;
-      # apply the CL quantity to the task part after SigmaNEST creates the tasks.
-      $quantityProperty='TASK_PART_PENDING'
-      $materialProperty='TASK_PENDING'
-      $thicknessProperty='TASK_PENDING'
-      $sourceProperty=SN-Try-Set -obj $part -names @('SourceFilePath','SourcePath') -value ([string]$sourcePath);SN-Safe-Set $part 'WONumber' $safe;SN-Safe-Set $part 'DrawingNumber' ([string]$x.part)
-      $created += [pscustomobject]@{part=$(try{[string]$part.Name}catch{[string]$x.part});qty=$quantity;material=$(try{[string]$part.Material}catch{[string]$x.sigmaMaterial});thickness=$(try{[string]$part.Thickness}catch{[string]$x.thicknessMm});quantityProperty=$quantityProperty;materialProperty=$materialProperty;thicknessProperty=$thicknessProperty;sourcePath=$sourcePath;sourceType=$sourceType;sourceProperty=$sourceProperty;batchMultiplier=$x.batchMultiplier;taskBatches=@($x.taskBatches)}
+      $material=[string]$x.sigmaMaterial
+      $thicknessText=$(if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){[string]$x.thicknessMm}else{''})
+      $queued += [pscustomobject]@{
+        request=$x
+        sourcePath=$sourcePath
+        sourceType=$sourceType
+        method=$load.method
+      }
+      $created += [pscustomobject]@{
+        part=[string]$x.part
+        qty=$quantity
+        material=$material
+        thickness=$thicknessText
+        quantityProperty='TASK_PART_PENDING'
+        materialProperty='TASK_PENDING'
+        thicknessProperty='TASK_PENDING'
+        sourcePath=$sourcePath
+        sourceType=$sourceType
+        sourceProperty=''
+        batchMultiplier=$x.batchMultiplier
+        taskBatches=@($x.taskBatches)
+      }
+    }
+
+    if($queued.Count -eq 0){
+      throw 'No geometry was queued for SigmaNEST import.'
+    }
+
+    $phase='COMMIT_IMPORTED_PARTS';$app.CreatePartsListForNewPartsInWS()
+    $afterParts=SN-Parts-Count $app
+    if($afterParts -lt ($beforeParts+$queued.Count)){
+      throw ('SigmaNEST committed '+($afterParts-$beforeParts)+' part(s) but '+$queued.Count+' part(s) were requested for import.')
     }
     $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
     # Persist the geometry/tasks checkpoint before touching mutable Task Setup
@@ -302,7 +328,7 @@ function Invoke-SigmaNestBuild($Request){
     $phase='APPLY_TASK_QUANTITIES';SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.2';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
+    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.3';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
   }catch{return [pscustomobject]@{ok=$false;creatorVersion='DIRECT-COM-1.2';phase=$phase;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}}
   finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
 }
