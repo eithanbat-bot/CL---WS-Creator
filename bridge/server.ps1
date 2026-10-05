@@ -533,40 +533,36 @@ function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[
   $c=@(Deduplicate-Candidates $candidates)
   if($c.Count -eq 0){return $null}
 
-  # Geometry-source rule:
-  # 1) PRS is always preferred over DXF.
-  # 2) When multiple PRS candidates exist, material/thickness scoring selects
-  #    the best compatible PRS instead of arbitrarily taking the first file.
-  # 3) If no PRS exists, the first indexed DXF remains the deterministic choice.
   $prs=@($c|Where-Object {[string]$_.fileType -eq 'PRS'})
-  if($prs.Count -gt 0){
-    $scored=@($prs|ForEach-Object{
-      $score=Candidate-Score -candidate $_ -clMat $clMat -clThk $clThk -matchType $matchType
-      [pscustomobject]@{candidate=$_;score=$score}
-    }|Sort-Object score -Descending)
-    if($scored.Count -eq 1){return $scored[0].candidate}
+  $pool=if($prs.Count -gt 0){$prs}else{@($c|Where-Object {[string]$_.fileType -eq 'DXF'})}
+  if($pool.Count -eq 0){$pool=$c}
+
+  $scored=@($pool|ForEach-Object{
+    $score=Candidate-Score -candidate $_ -clMat $clMat -clThk $clThk -matchType $matchType
+    # Stable filename/path tie-breaks make the choice deterministic across runs.
+    [pscustomobject]@{candidate=$_;score=[int]$score}
+  }|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[string]$_.candidate.file};Descending=$false})
+
+  $selected=$scored[0].candidate
+  Set-Prop $selected 'selectionDecision' 'BEST CANDIDATE' | Out-Null
+  Set-Prop $selected 'candidateScore' ([int]$scored[0].score) | Out-Null
+
+  if($scored.Count -gt 1){
+    $alternatives=@($scored|Select-Object -First 8|ForEach-Object{
+      [pscustomobject]@{file=[string]$_.candidate.file;score=[int]$_.score;fileType=[string]$_.candidate.fileType}
+    })
+    Set-Prop $selected 'candidateAlternatives' $alternatives | Out-Null
+
     $top=[int]$scored[0].score
     $second=[int]$scored[1].score
-    # A strong material/thickness winner is safe. A tie or weak lead remains
-    # a review case rather than silently selecting the wrong geometry.
-    if($top -gt $second -and ($top-$second) -ge 40){return $scored[0].candidate}
-    # Keep the best geometry even when the score is tied. The caller will
-    # mark the row REVIEW, but it must still retain sourcePath so SigmaNEST can
-    # import the geometry. The previous implementation returned only an
-    # "ambiguous" wrapper, which deliberately discarded the usable source and
-    # caused "Imported into WS: 0".
-    $selected=$scored[0].candidate
-    Set-Prop $selected 'selectionAmbiguous' $true | Out-Null
-    Set-Prop $selected 'candidateScores' @($scored|Select-Object -First 6|ForEach-Object{
-      [pscustomobject]@{file=$_.candidate.file;score=$_.score}
-    }) | Out-Null
-    Set-Prop $selected 'ambiguousCount' ([int]$scored.Count) | Out-Null
-    return $selected
+    if(($top-$second) -lt 40){
+      Set-Prop $selected 'selectionAmbiguous' $true | Out-Null
+      Set-Prop $selected 'ambiguousCount' ([int]$scored.Count) | Out-Null
+      Set-Prop $selected 'candidateScores' $alternatives | Out-Null
+    }
   }
 
-  $dxf=@($c|Where-Object {[string]$_.fileType -eq 'DXF'})
-  if($dxf.Count -gt 0){return $dxf[0]}
-  return $c[0]
+  return $selected
 }
 
 function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
