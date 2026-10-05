@@ -2,6 +2,9 @@
 # No top-level execution and no exit statements.
 
 function SN-Invoke-ComMethod($obj,[string]$name,[object[]]$args=@()){
+  # Use reflection only for calls whose COM signature is not fixed in our
+  # verified SigmaNEST interface. Verified SNApp methods are called directly
+  # elsewhere below so PowerShell's COM binder supplies the correct signature.
   $obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::InvokeMethod,$null,$obj,$args)
 }
 
@@ -41,8 +44,14 @@ function SN-Add-Geometry($app,[string]$sourcePath,[string]$sourceType){
   $before=SN-Parts-Count $app
   $errors=@()
   try{
-    $loaded=SN-Invoke-ComMethod $app 'LoadPart' @([string]$sourcePath)
-    if([bool]$loaded){try{SN-Invoke-ComMethod $app 'CreatePartsListForNewPartsInWS' @()|Out-Null}catch{};return SN-Get-NewPart $app $before $label}
+    # Verified SigmaNEST X1.4 interface: SNApp.LoadPart(string).
+    # Do not use Type.InvokeMember here; it binds the COM method incorrectly
+    # on this installation and reports a parameter-count mismatch.
+    $loaded=$app.LoadPart([string]$sourcePath)
+    if([bool]$loaded){
+      try{$app.CreatePartsListForNewPartsInWS()}catch{}
+      return SN-Get-NewPart $app $before $label
+    }
     $errors+='LoadPart returned False'
   }catch{$errors+=('LoadPart: '+$_.Exception.Message)}
   if($sourceType -eq 'DXF'){
@@ -95,9 +104,9 @@ function Invoke-SigmaNestBuild($Request){
       $sourceProperty=SN-Try-Set -obj $part -names @('SourceFilePath','SourcePath') -value ([string]$sourcePath);SN-Safe-Set $part 'WONumber' $safe;SN-Safe-Set $part 'DrawingNumber' ([string]$x.part)
       $created += [pscustomobject]@{part=$(try{[string]$part.Name}catch{[string]$x.part});qty=$quantity;material=$(try{[string]$part.Material}catch{[string]$x.sigmaMaterial});thickness=$(try{[string]$part.Thickness}catch{[string]$x.thicknessMm});quantityProperty=$quantityProperty;materialProperty=$materialProperty;thicknessProperty=$thicknessProperty;sourcePath=$sourcePath;sourceType=$sourceType;sourceProperty=$sourceProperty;batchMultiplier=$x.batchMultiplier;taskBatches=@($x.taskBatches)}
     }
-    $phase='CREATE_TASKS';try{SN-Invoke-ComMethod $app 'CreateTasksListForNewPartsInWS' @()|Out-Null}catch{}
-    $phase='SAVE_WS';SN-Invoke-ComMethod $app 'SaveWorkSpaceFile' @([string]$wsPath) | Out-Null
-    try{SN-Invoke-ComMethod $app 'LoadWorkSpaceFile' @([string]$wsPath)|Out-Null}catch{};try{SN-Invoke-ComMethod $app 'RefreshTreeView' @()|Out-Null}catch{};try{SN-Invoke-ComMethod $app 'Redraw' @()|Out-Null}catch{}
+    $phase='CREATE_TASKS';try{$app.CreateTasksListForNewPartsInWS()}catch{}
+    $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
+    try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
     return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
   }catch{return [pscustomobject]@{ok=$false;creatorVersion='DIRECT-COM-1.0';phase=$phase;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}}
   finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
