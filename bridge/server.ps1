@@ -521,15 +521,33 @@ function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[
   if($c.Count -eq 0){return $null}
 
   # Geometry-source rule:
-  # 1) If any PRS matches at this stage, use the first PRS found.
-  # 2) Only when no PRS exists, use the first DXF found.
-  # This deliberately avoids treating multiple geometry files as ambiguous.
+  # 1) PRS is always preferred over DXF.
+  # 2) When multiple PRS candidates exist, material/thickness scoring selects
+  #    the best compatible PRS instead of arbitrarily taking the first file.
+  # 3) If no PRS exists, the first indexed DXF remains the deterministic choice.
   $prs=@($c|Where-Object {[string]$_.fileType -eq 'PRS'})
-  if($prs.Count -gt 0){return $prs[0]}
+  if($prs.Count -gt 0){
+    $scored=@($prs|ForEach-Object{
+      $score=Candidate-Score -candidate $_ -clMat $clMat -clThk $clThk -matchType $matchType
+      [pscustomobject]@{candidate=$_;score=$score}
+    }|Sort-Object score -Descending)
+    if($scored.Count -eq 1){return $scored[0].candidate}
+    $top=[int]$scored[0].score
+    $second=[int]$scored[1].score
+    # A strong material/thickness winner is safe. A tie or weak lead remains
+    # a review case rather than silently selecting the wrong geometry.
+    if($top -gt $second -and ($top-$second) -ge 40){return $scored[0].candidate}
+    $ambiguous=@($scored|Select-Object -First 6|ForEach-Object{$_.candidate})
+    return [pscustomobject]@{
+      ambiguous=$ambiguous
+      candidateScores=@($scored|Select-Object -First 6|ForEach-Object{
+        [pscustomobject]@{file=$_.candidate.file;score=$_.score}
+      })
+    }
+  }
 
   $dxf=@($c|Where-Object {[string]$_.fileType -eq 'DXF'})
   if($dxf.Count -gt 0){return $dxf[0]}
-
   return $c[0]
 }
 
