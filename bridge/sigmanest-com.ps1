@@ -532,7 +532,7 @@ function SN-Try-SetImportSetting($settings,[string[]]$aliases,$value,[string]$ex
     $norm=SN-NormalizeFieldName $method
     foreach($alias in @($aliases)){
       $an=SN-NormalizeFieldName $alias
-      if($norm -eq $an -or $norm -eq ('SET'+$an) -or $norm -eq ('SET'+$an+'VALUE') -or $norm -eq ('SET'+$an+'NAME')){
+      if($norm -eq $an -or $norm -eq ('SET'+$an) -or $norm -eq ('SET'+$an+'VALUE') -or $norm -eq ('SET'+$an+'NAME') -or ($norm.StartsWith('SET') -and $norm.Contains($an))){
         $hit=SN-InvokeSingleArgMember -obj $settings -methodName $method -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
         if($hit){return ('METHOD.'+$hit)}
       }
@@ -593,6 +593,38 @@ function SN-Get-ImportDiagnostics($adapter,$settings){
   }
   return @($parts)
 }
+function SN-SetImportSettingDeep($root,[string[]]$aliases,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
+  if($null -eq $root){return $null}
+  $visited=@{}
+  $queue=New-Object System.Collections.Queue
+  $queue.Enqueue([pscustomobject]@{object=$root;path='ROOT';depth=0})
+  while($queue.Count -gt 0){
+    $node=$queue.Dequeue()
+    $obj=$node.object;$depth=[int]$node.depth
+    if($null -eq $obj -or $depth -gt 5){continue}
+    $identity=''
+    try{$identity=[string][Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($obj)}catch{}
+    if($identity -and $visited.ContainsKey($identity)){continue}
+    if($identity){$visited[$identity]=$true}
+
+    $hit=SN-Try-SetImportSetting -settings $obj -aliases $aliases -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
+    if($hit){return [pscustomobject]@{path=($node.path+'.'+$hit)}}
+
+    if($depth -ge 5){continue}
+    foreach($prop in @(SN-ComPropertyNamesAll $obj)){
+      if($prop -in @('Owner','Parent','ParentObject','Application','PartImportSettings','SolidsList','Count','Item','Items')){continue}
+      try{
+        $child=$obj.$prop
+        if($null -eq $child -or $child -is [string] -or $child -is [ValueType]){continue}
+        if($child -is [System.Array]){
+          if($child.Count -eq 1){$child=$child[0]}else{continue}
+        }
+        $queue.Enqueue([pscustomobject]@{object=$child;path=($node.path+'.'+$prop);depth=$depth+1})
+      }catch{}
+    }
+  }
+  return $null
+}
 function SN-Configure-PRS-ImportSettings($settings,$clData){
   $material=[string]$clData.sigmaMaterial
   $thickness=SN-Scalar-Number -value $clData.thicknessMm -default ([double]::NaN)
@@ -600,14 +632,17 @@ function SN-Configure-PRS-ImportSettings($settings,$clData){
   if($qty -lt 1){$qty=1}
   $result=[ordered]@{material='';thickness='';quantity='';warnings=@()}
   if(-not [string]::IsNullOrWhiteSpace($material)){
-    $result.material=SN-Try-SetImportSetting -settings $settings -aliases @('Material','MaterialName','Mat','MatName','MaterialType','MaterialString') -value $material -expectedText $material
+    $r=SN-SetImportSettingDeep -root $settings -aliases @('Material','MaterialName','PartMaterial','MaterialType','MaterialString') -value $material -expectedText $material
+    if($r){$result.material=$r.path}
   }
   if(-not [double]::IsNaN($thickness)){
-    $result.thickness=SN-Try-SetImportSetting -settings $settings -aliases @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -value $thickness -expectedNumber $thickness
+    $r=SN-SetImportSettingDeep -root $settings -aliases @('Thickness','SheetThickness','MaterialThickness','MaterialThk','Thk','Thick') -value $thickness -expectedNumber $thickness
+    if($r){$result.thickness=$r.path}
   }
-  $result.quantity=SN-Try-SetImportSetting -settings $settings -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','NumberToNest','NumberToLoad','BatchQuantity') -value $qty -expectedInt $qty
+  $r=SN-SetImportSettingDeep -root $settings -aliases @('QtyOrdered','Quantity','PartQuantity','NumberToNest','NumberToLoad','QuantityToNest','QtyToNest','BatchQuantity') -value $qty -expectedInt $qty
+  if($r){$result.quantity=$r.path}
   if([string]::IsNullOrWhiteSpace([string]$result.material)){ $result.warnings+='Import settings did not expose a verified material field.' }
-  if([double]::IsNaN($thickness) -eq $false -and [string]::IsNullOrWhiteSpace([string]$result.thickness)){ $result.warnings+='Import settings did not expose a verified thickness field.' }
+  if(-not [double]::IsNaN($thickness) -and [string]::IsNullOrWhiteSpace([string]$result.thickness)){ $result.warnings+='Import settings did not expose a verified thickness field.' }
   if([string]::IsNullOrWhiteSpace([string]$result.quantity)){ $result.warnings+='Import settings did not expose a verified quantity field.' }
   return [pscustomobject]$result
 }
