@@ -255,49 +255,125 @@ function SN-Set-PartField($partObj,[string[]]$names,$value,[string]$expectedText
   }
   return (SN-Set-PartFieldDiscovered -partObj $partObj -aliases $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt)
 }
+function SN-Normalize-PartIdentity([string]$value){
+  if($null -eq $value){return ''}
+  return (($value.ToUpperInvariant() -replace '\\.[Pp][Rr][Ss]$','') -replace '[^A-Z0-9]','')
+}
+function SN-Get-PartIdentity($partObj){
+  if($null -eq $partObj){return [pscustomobject]@{name='';drawing='';file='';normalizedName='';normalizedDrawing='';normalizedFile=''}}
+  $name='';$drawing='';$file=''
+  try{$name=[string]$partObj.Name}catch{}
+  try{$drawing=[string]$partObj.DrawingNumber}catch{}
+  try{$file=[string]$partObj.PartFilename}catch{}
+  return [pscustomobject]@{
+    name=$name
+    drawing=$drawing
+    file=$file
+    normalizedName=(SN-Normalize-PartIdentity $name)
+    normalizedDrawing=(SN-Normalize-PartIdentity $drawing)
+    normalizedFile=(SN-Normalize-PartIdentity ([IO.Path]::GetFileNameWithoutExtension($file)))
+  }
+}
+function SN-Find-WorkspacePartExact($app,$targetName,$sourcePath='',$usedIndices=@()){
+  $targetNorm=SN-Normalize-PartIdentity $targetName
+  $sourceStem=''
+  try{$sourceStem=SN-Normalize-PartIdentity ([IO.Path]::GetFileNameWithoutExtension([string]$sourcePath))}catch{}
+  $sourceStemNoPrs=SN-Normalize-PartIdentity ($sourceStem -replace '(?i)PRS$','')
+  $count=SN-Parts-Count $app
+  $candidates=@()
+  for($i=0;$i -lt $count;$i++){
+    if(@($usedIndices) -contains $i){continue}
+    $part=$null
+    try{$part=$app.PartsList.Items($i)}catch{continue}
+    if($null -eq $part){continue}
+    $id=SN-Get-PartIdentity $part
+    $score=0
+    if($targetNorm -and $id.normalizedName -eq $targetNorm){$score=100}
+    if($sourceStemNoPrs -and $id.normalizedFile -eq $sourceStemNoPrs){$score=[math]::Max($score,95)}
+    if($targetNorm -and $id.normalizedDrawing -eq $targetNorm){$score=[math]::Max($score,90)}
+    if($sourceStemNoPrs -and $id.normalizedDrawing -eq $sourceStemNoPrs){$score=[math]::Max($score,85)}
+    if($score -gt 0){
+      $candidates += [pscustomobject]@{part=$part;index=$i;score=$score;identity=$id}
+    }
+  }
+  if($candidates.Count -eq 0){return $null}
+  $top=@($candidates|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[int]$_.index};Descending=$false})
+  if($top.Count -gt 1 -and [int]$top[0].score -eq [int]$top[1].score){
+    # Prefer an exact normalized Name match over filename/drawing fallbacks.
+    $exact=@($top|Where-Object {$_.identity.normalizedName -eq $targetNorm})
+    if($exact.Count -eq 1){return $exact[0]}
+    if($exact.Count -gt 1){throw ('Multiple SigmaNEST workspace parts match CL part "'+$targetName+'".')}
+  }
+  return $top[0]
+}
+function SN-Verify-PartIdentity($partObj,$targetName,$sourcePath=''){
+  $id=SN-Get-PartIdentity $partObj
+  $targetNorm=SN-Normalize-PartIdentity $targetName
+  $sourceNorm=''
+  try{$sourceNorm=SN-Normalize-PartIdentity ([IO.Path]::GetFileNameWithoutExtension([string]$sourcePath))}catch{}
+  $sourceNorm=SN-Normalize-PartIdentity ($sourceNorm -replace '(?i)PRS$','')
+  if($targetNorm -and $id.normalizedName -eq $targetNorm){return $true}
+  if($targetNorm -and $id.normalizedDrawing -eq $targetNorm){return $true}
+  if($sourceNorm -and $id.normalizedFile -eq $sourceNorm){return $true}
+  if($sourceNorm -and $id.normalizedDrawing -eq $sourceNorm){return $true}
+  return $false
+}
 function SN-Apply-WorkspacePartData($app,$requestParts){
   $updated=@()
+  $usedIndices=@()
   foreach($rp in @($requestParts)){
     $targetName=[string]$rp.part
-    $found=$null
-    $workspaceIndex=-1
-    try{if($null -ne $rp.workspaceIndex){$workspaceIndex=SN-Scalar-Int -value $rp.workspaceIndex -default -1}}catch{}
-    if($workspaceIndex -ge 0){$found=SN-Get-WorkspacePartByIndex -app $app -index $workspaceIndex}
-    if($null -eq $found){$found=SN-Find-WorkspacePart -app $app -targetName $targetName}
-    if($null -eq $found){throw ('Could not find imported workspace part "'+$targetName+'" while applying CL data.')}
+    $sourcePath=[string]$rp.sourcePath
+    $found=SN-Find-WorkspacePartExact -app $app -targetName $targetName -sourcePath $sourcePath -usedIndices $usedIndices
+    if($null -eq $found){
+      throw ('Could not map imported SigmaNEST geometry back to CL part "'+$targetName+'". The imported PartsList order is not trusted.')
+    }
+    if(-not (SN-Verify-PartIdentity -partObj $found.part -targetName $targetName -sourcePath $sourcePath)){
+      throw ('SigmaNEST workspace identity verification failed for CL part "'+$targetName+'". Refusing to overwrite another part.')
+    }
+    $usedIndices += [int]$found.index
     $partObj=$found.part
     $qty=SN-Scalar-Int -value $rp.qty -default 1
     if($qty -lt 1){$qty=1}
     $material=[string]$rp.sigmaMaterial
     $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
-    $row=[ordered]@{part=$targetName;index=[int]$found.index;qty=$qty;material=$material;thickness=$thickness;quantityProperty='';materialProperty='';thicknessProperty='';warnings=@()}
+    $row=[ordered]@{
+      part=$targetName
+      index=[int]$found.index
+      qty=$qty
+      material=$material
+      thickness=$thickness
+      quantityProperty=''
+      materialProperty=''
+      thicknessProperty=''
+      warnings=@()
+    }
 
     if(-not [string]::IsNullOrWhiteSpace($material)){
-      $setInfo=$null
-      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Material','MaterialName','Mat','MatName','MaterialType') -value $material -expectedText $material}catch{
-        if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating material for "'+$targetName+'" (0x80010108).')}
+      $setInfo=SN-Set-PartField -partObj $partObj -names @('Material','MaterialName','Mat','MatName','MaterialType') -value $material -expectedText $material
+      if(-not $setInfo){
+        throw ('CL material "'+$material+'" could not be written and verified on SigmaNEST part "'+$targetName+'".')
       }
-      if(-not $setInfo){throw ('CL material "'+$material+'" could not be written/read back on imported workspace part "'+$targetName+'".')}
+      $row.materialProperty=[string]$setInfo.path
     }
 
     if(-not [double]::IsNaN($thickness)){
-      $setInfo=$null
-      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -value $thickness -expectedNumber $thickness}catch{
-        if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating thickness for "'+$targetName+'" (0x80010108).')}
+      $setInfo=SN-Set-PartField -partObj $partObj -names @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -value $thickness -expectedNumber $thickness
+      if(-not $setInfo){
+        throw ('CL thickness '+$thickness+'mm could not be written and verified on SigmaNEST part "'+$targetName+'".')
       }
-      if(-not $setInfo){throw ('CL thickness '+$thickness+'mm could not be written/read back on imported workspace part "'+$targetName+'".')}
+      $row.thicknessProperty=[string]$setInfo.path
     }
 
-    $setInfo=$null
-    try{$setInfo=SN-Set-PartField -partObj $partObj -names @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -value $qty -expectedInt $qty}catch{
-      if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating quantity for "'+$targetName+'" (0x80010108).')}
+    $setInfo=SN-Set-PartField -partObj $partObj -names @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -value $qty -expectedInt $qty
+    if(-not $setInfo){
+      throw ('CL quantity '+$qty+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
     }
-    if(-not $setInfo){throw ('CL quantity '+$qty+' could not be written/read back on imported workspace part "'+$targetName+'".')}
+    $row.quantityProperty=[string]$setInfo.path
     $updated += [pscustomobject]$row
   }
   @($updated)
 }
-
 function SN-Parts-Count($app){try{return [int]$app.PartsList.Count}catch{return 0}}
 
 function SN-Get-NewPart($app,$beforeCount,[string]$label){
