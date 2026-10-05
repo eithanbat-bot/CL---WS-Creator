@@ -5,7 +5,7 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>aa4e069e-cb5f-4a00-81a4-877e021afeeb</Id>
-  <Version>1.4.5.0</Version>
+  <Version>1.4.6.0</Version>
   <ProviderName>CL - WS Creator</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
 
