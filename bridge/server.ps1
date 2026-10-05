@@ -542,9 +542,10 @@ function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[
 }
 
 function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
-  # Geometry-source rule: match by part/drawing name only. If any PRS matches
-  # at this stage, use the first PRS found. Only when no PRS exists, use the
-  # first DXF found. PRS never supplies material, thickness, or quantity.
+  # Geometry-source rule: match by part/drawing name only.
+  # If any PRS matches at this stage, use the first PRS found.
+  # Only when no PRS exists, use the first DXF found.
+  # PRS never supplies material, thickness, or quantity.
   $n=Normalize -s $part
   $dxf=@()
   if($script:DXF_ROOT){$dxf=@(Get-DxfShardCandidates -root $script:DXF_ROOT -part $part)}
