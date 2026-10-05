@@ -73,6 +73,137 @@ function SN-Add-Geometry($app,[string]$sourcePath,[string]$sourceType){
   throw ('SigmaNEST could not import "'+$label+'". '+($errors -join ' | '))
 }
 
+function SN-Set-TaskMaterialAndThickness($app,$requestParts){
+  $taskCount=0
+  try{$taskCount=[int]$app.TasksList.Count}catch{}
+  if($taskCount -le 0){
+    throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL material/thickness safely.'
+  }
+
+  foreach($rp in @($requestParts)){
+    $targetName=[string]$rp.part
+    $material=[string]$rp.sigmaMaterial
+    $thickness=$null
+    try{
+      if($rp.thicknessMm -ne $null -and -not [double]::IsNaN([double]$rp.thicknessMm)){
+        $thickness=[double]$rp.thicknessMm
+      }
+    }catch{}
+
+    $matched=$false
+    for($ti=0;$ti -lt $taskCount -and -not $matched;$ti++){
+      $task=$null
+      try{$task=$app.TasksList.Items($ti)}catch{continue}
+      if($null -eq $task){continue}
+
+      $taskPartCount=0
+      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
+      if($taskPartCount -le 0){continue}
+
+      $foundInTask=$false
+      for($pi=0;$pi -lt $taskPartCount;$pi++){
+        $taskPart=$null
+        try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
+        if($null -eq $taskPart){continue}
+        $taskPartName=''
+        try{$taskPartName=[string]$taskPart.Name}catch{}
+        if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
+        if($taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){
+          $foundInTask=$true
+          break
+        }
+      }
+      if(-not $foundInTask){continue}
+
+      if(-not [string]::IsNullOrWhiteSpace($material)){
+        $setMaterial=$null
+        foreach($propertyName in @('Material','MaterialName','Mat')){
+          try{
+            $task.$propertyName=$material
+            $readBack=[string]$task.$propertyName
+            if($readBack.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
+              $setMaterial=$propertyName
+              break
+            }
+          }catch{}
+        }
+
+        if(-not $setMaterial){
+          for($pi=0;$pi -lt $taskPartCount -and -not $setMaterial;$pi++){
+            $taskPart=$null
+            try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
+            if($null -eq $taskPart){continue}
+            $taskPartName=''
+            try{$taskPartName=[string]$taskPart.Name}catch{}
+            if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
+
+            foreach($propertyName in @('Material','MaterialName','Mat')){
+              try{
+                $taskPart.$propertyName=$material
+                $readBack=[string]$taskPart.$propertyName
+                if($readBack.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
+                  $setMaterial=$propertyName
+                  break
+                }
+              }catch{}
+            }
+          }
+        }
+
+        if(-not $setMaterial){
+          throw ('SigmaNEST task "'+[string]$task.Name+'" does not expose a writable material property on either Task or Task.PartsList. Requested="'+$material+'".')
+        }
+      }
+
+      if($null -ne $thickness){
+        $setThickness=$null
+        foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
+          try{
+            $task.$propertyName=$thickness
+            $readBack=[double]$task.$propertyName
+            if($readBack -eq $thickness){
+              $setThickness=$propertyName
+              break
+            }
+          }catch{}
+        }
+
+        if(-not $setThickness){
+          for($pi=0;$pi -lt $taskPartCount -and -not $setThickness;$pi++){
+            $taskPart=$null
+            try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
+            if($null -eq $taskPart){continue}
+            $taskPartName=''
+            try{$taskPartName=[string]$taskPart.Name}catch{}
+            if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
+
+            foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
+              try{
+                $taskPart.$propertyName=$thickness
+                $readBack=[double]$taskPart.$propertyName
+                if($readBack -eq $thickness){
+                  $setThickness=$propertyName
+                  break
+                }
+              }catch{}
+            }
+          }
+        }
+
+        if(-not $setThickness){
+          throw ('SigmaNEST task "'+[string]$task.Name+'" does not expose a writable thickness property on either Task or Task.PartsList. Requested='+$thickness+'.')
+        }
+      }
+
+      $matched=$true
+    }
+
+    if(-not $matched){
+      throw ('Could not find CL part "'+$targetName+'" inside any SigmaNEST task after task creation.')
+    }
+  }
+}
+
 function SN-Set-TaskPartQuantity($app,$requestParts){
   $taskCount=0
   try{$taskCount=[int]$app.TasksList.Count}catch{}
@@ -159,16 +290,17 @@ function Invoke-SigmaNestBuild($Request){
       # Workspace ISNPartObj quantity is not the production/work-order quantity;
       # apply the CL quantity to the task part after SigmaNEST creates the tasks.
       $quantityProperty='TASK_PART_PENDING'
-      $materialProperty=$null;if(-not [string]::IsNullOrWhiteSpace([string]$x.sigmaMaterial)){$materialProperty=SN-Set-Required -obj $part -names @('Material') -value ([string]$x.sigmaMaterial) -label 'material'}
-      $thicknessProperty=$null;if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){$thicknessProperty=SN-Try-Set -obj $part -names @('Thickness','SheetThickness','Thk') -value ([double]$x.thicknessMm)}
+      $materialProperty='TASK_PENDING'
+      $thicknessProperty='TASK_PENDING'
       $sourceProperty=SN-Try-Set -obj $part -names @('SourceFilePath','SourcePath') -value ([string]$sourcePath);SN-Safe-Set $part 'WONumber' $safe;SN-Safe-Set $part 'DrawingNumber' ([string]$x.part)
       $created += [pscustomobject]@{part=$(try{[string]$part.Name}catch{[string]$x.part});qty=$quantity;material=$(try{[string]$part.Material}catch{[string]$x.sigmaMaterial});thickness=$(try{[string]$part.Thickness}catch{[string]$x.thicknessMm});quantityProperty=$quantityProperty;materialProperty=$materialProperty;thicknessProperty=$thicknessProperty;sourcePath=$sourcePath;sourceType=$sourceType;sourceProperty=$sourceProperty;batchMultiplier=$x.batchMultiplier;taskBatches=@($x.taskBatches)}
     }
     $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
+    $phase='APPLY_TASK_ATTRIBUTES';SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
     $phase='APPLY_TASK_QUANTITIES';SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
+    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.1';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
   }catch{return [pscustomobject]@{ok=$false;creatorVersion='DIRECT-COM-1.0';phase=$phase;error=$_.Exception.Message;category=$_.CategoryInfo.ToString()}}
   finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
 }
