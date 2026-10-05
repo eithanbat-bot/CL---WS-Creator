@@ -53,7 +53,48 @@ function Get-ListeningPids([int]$Port){
     try{
       $lines=netstat -ano -p tcp 2>$null
       foreach($line in $lines){
-        if($line -match '^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*
+        $parts=$line -split '[ ]+' | Where-Object { $_ -ne '' }
+        if($parts.Count -ge 5 -and $parts[0] -eq 'TCP' -and $parts[3] -eq 'LISTENING'){
+          $local=$parts[1]
+          $colon=$local.LastIndexOf(':')
+          if($colon -gt 0){
+            $localPort=[int]$local.Substring($colon+1)
+            if($localPort -eq $Port){
+              $id=[int]$parts[4]
+              if($id -gt 0 -and $id -ne $PID){$pids+=$id}
+            }
+          }
+        }
+      }
+    }catch{}
+  }
+  @($pids|Sort-Object -Unique)
+}
+
+function Stop-CreatorPortOwners([int]$Port){
+  $owners=@(Get-ListeningPids -Port $Port)
+  foreach($id in $owners){
+    try{
+      $proc=Get-Process -Id $id -ErrorAction SilentlyContinue
+      if($null -ne $proc){
+        Say "Stopping process PID $id that owns Creator port $Port..."
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+      }
+    }catch{}
+  }
+  for($i=0;$i -lt 20;$i++){
+    $remaining=@(Get-ListeningPids -Port $Port)
+    if($remaining.Count -eq 0){return $true}
+    Start-Sleep -Milliseconds 250
+  }
+  $remaining=@(Get-ListeningPids -Port $Port)
+  if($remaining.Count -gt 0){
+    throw ("Creator port "+$Port+" is still owned by PID(s) "+($remaining -join ', ')+". The old bridge could not be stopped safely.")
+  }
+  return $true
+}
+
+function Stop-CreatorProcesses([string]$ServerPath){
   try{
     $serverPattern=[regex]::Escape([IO.Path]::GetFullPath($ServerPath))
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue|
@@ -63,7 +104,10 @@ function Get-ListeningPids([int]$Port){
           [string]$_.CommandLine -match 'dxf-indexer\.ps1'
         )
       }|
-      ForEach-Object{Say "Stopping existing Creator process PID $($_.ProcessId)...";Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue}
+      ForEach-Object{
+        Say "Stopping existing Creator process PID $($_.ProcessId)..."
+        Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue
+      }
   }catch{}
   Start-Sleep -Milliseconds 600
 }
@@ -232,6 +276,7 @@ if(-not(Test-Path -LiteralPath $Server)){
 }
 
 Stop-CreatorPortOwners -Port $Port | Out-Null
+  Stop-CreatorPortOwners -Port $Port | Out-Null
 Say "Starting bridge $(Get-Version $Server) on http://127.0.0.1:$Port" 'Cyan'
 $ps=(Join-Path $PSHOME 'powershell.exe')
 if(-not(Test-Path -LiteralPath $ps)){ $ps=(Get-Command powershell.exe -ErrorAction Stop).Source }
