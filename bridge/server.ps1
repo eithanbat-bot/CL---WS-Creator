@@ -1069,7 +1069,9 @@ function Handle-Request($req){
       if([string]::IsNullOrWhiteSpace($rawText) -or $rawText -match 'INVOKE_PRE'){
         $detail='SigmaNEST creator returned no usable result from the in-process STA invocation.'
         $detail+=' localResultExists='+$localResultExists+' localResultBytes='+$localResultLength
-        $detail+=' invokeOutput='+(try{(@($invokeOutput)|ForEach-Object{[string]$_}) -join ' || '}catch{''})
+        $invokeText=''
+        try{$invokeText=(@($invokeOutput)|ForEach-Object{[string]$_}) -join ' || '}catch{}
+        $detail+=' invokeOutput='+$invokeText
         if(Test-Path -LiteralPath $creatorErr){
           $errText=[string](Get-Content -LiteralPath $creatorErr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue).Trim()
           if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' ERROR: '+$errText}
