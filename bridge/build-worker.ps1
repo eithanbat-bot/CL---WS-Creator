@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.11.1'
+$WorkerVersion='2.11.2'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
@@ -38,9 +38,61 @@ try{
     parts=@($request.reportParts)
   })
 
-  if(-not(Test-Path -LiteralPath $ComLibrary)){throw 'SigmaNEST COM library is missing: '+$ComLibrary}
-  . $ComLibrary
+  $serverLibrary=Join-Path $Root 'server.ps1'
+  if(-not(Test-Path -LiteralPath $serverLibrary)){throw 'Bridge server library is missing: '+$serverLibrary}
+  . $serverLibrary -LibraryOnly
 
+  Write-BuildStatus $statusFile ([ordered]@{
+    jobId=[string]$request.jobId
+    state='RUNNING'
+    phase='PREPARE'
+    message='Matching CL parts, validating geometry and staging the SigmaNEST job.'
+    workerVersion=$WorkerVersion
+    pid=$PID
+    started=$started.ToString('o')
+    finished=$null
+    elapsedSeconds=((Get-Date).ToUniversalTime()-$started).TotalSeconds
+    result=$null
+    parts=@($request.reportParts)
+    jobName=[string]$request.jobName
+    selectedSheets=@($request.selectedSheets)
+  })
+
+  $prepared=Prepare-SigmaNestBuild -b $request.buildRequest
+  if($null -eq $prepared){throw 'Background build preparation returned no result.'}
+  $request.reportParts=@($prepared.parts)
+  $request.outputDir=[string]$prepared.outputDir
+  $request.jobName=[string]$prepared.jobName
+  $request.selectedSheets=@($prepared.selectedSheets)
+
+  if($prepared.noGeometry){
+    $finished=(Get-Date).ToUniversalTime()
+    Write-BuildStatus $statusFile ([ordered]@{
+      jobId=[string]$request.jobId
+      state='COMPLETE'
+      phase='PREPARE'
+      message=[string]$prepared.message
+      workerVersion=$WorkerVersion
+      pid=$PID
+      started=$started.ToString('o')
+      finished=$finished.ToString('o')
+      elapsedSeconds=[math]::Round((($finished-$started).TotalSeconds),1)
+      result=$prepared
+      parts=@($prepared.parts)
+      outputDir=[string]$prepared.outputDir
+      jobName=[string]$prepared.jobName
+      selectedSheets=@($prepared.selectedSheets)
+      reviewCount=[int]$prepared.reviewCount
+      reviewBreakdown=$prepared.reviewBreakdown
+      importedCount=[int]$prepared.importedCount
+      missingCount=[int]$prepared.missingCount
+      wsPath=''
+    })
+    Remove-Item -LiteralPath $RequestFile -Force -ErrorAction SilentlyContinue
+    exit 0
+  }
+
+  $request.engineRequest=$prepared.engineRequest
   $phase='COM_BUILD'
   Write-BuildStatus $statusFile ([ordered]@{
     jobId=[string]$request.jobId
@@ -77,6 +129,11 @@ try{
     outputDir=[string]$request.outputDir
     jobName=[string]$request.jobName
     selectedSheets=@($request.selectedSheets)
+    reviewCount=$(if($null -ne $prepared.reviewCount){[int]$prepared.reviewCount}else{0})
+    reviewBreakdown=$(if($null -ne $prepared.reviewBreakdown){$prepared.reviewBreakdown}else{@{}})
+    importedCount=$(if($null -ne $data.importedCount){[int]$data.importedCount}else{[int]$data.partCount})
+    missingCount=$(if($null -ne $data.missingCount){[int]$data.missingCount}else{[int]$prepared.missingCount})
+    wsPath=[string]$data.wsPath
   })
 }catch{
   $finished=(Get-Date).ToUniversalTime()
@@ -97,6 +154,8 @@ try{
         elapsedSeconds=[math]::Round((($finished-$started).TotalSeconds),1)
         result=$null
         parts=if($request){@($request.reportParts)}else{@()}
+        outputDir=if($request){[string]$request.outputDir}else{''}
+        jobName=if($request){[string]$request.jobName}else{''}
       })
     }
   }catch{}
