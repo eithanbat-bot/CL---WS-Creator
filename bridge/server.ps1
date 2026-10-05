@@ -1,8 +1,8 @@
-param()
+param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.11.1'
+$BRIDGE_VERSION = '2.11.2'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -811,7 +811,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.11.1'
+    workerVersion='2.11.2'
     pid=$null
     started=$started.ToString('o')
     finished=$null
@@ -853,35 +853,9 @@ function Read-BuildStatus([string]$jobId){
   try{return (Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json)}
   catch{return [pscustomobject]@{jobId=$jobId;state='RUNNING';phase='STATUS_READ';message='Build status is being written; retry shortly.'}}
 }
-function Handle-Request($req){
-  if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
-  if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG['libraryRoot'];dxfRoot=$CFG['dxfRoot'];lastScan=$CFG['lastScan'];count=[int]$CFG['count'];discoveredFiles=[int]$CFG['discoveredFiles'];prsCount=[int]$CFG['prsCount'];dxfCount=[int]$CFG['dxfCount'];dxfIndexState=[string]$CFG['dxfIndexState'];dxfIndexMessage=[string]$CFG['dxfIndexMessage'];sigmaNestCom=$true;bridge='PowerShell'}}
-  }
-  if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
-    $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
-    $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
-    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
-    # Start the huge DXF walk in a background PowerShell process; never wait on Y:\ here.
-    $dxfStatus=Start-DxfScan -root $dxfRoot
-    $diag=Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot
-    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;dxfIndexedCount=$dxfStatus.filesFound;dxfStatus=$dxfStatus;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot}}
-  }
-  if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
-    $status=Get-DxfStatus
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;mode=[string]$status.mode;started=$status.started;finished=$status.finished;generatedUtc=$status.generatedUtc;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});exitCode=$(try{[int]$status.exitCode}catch{0});workers=$(try{[int]$status.workers}catch{[int]$CFG['dxfWorkers']});workersCompleted=$(try{[int]$status.workersCompleted}catch{0});directoriesVisited=$(try{[int]$status.directoriesVisited}catch{0});elapsedSeconds=$(try{[double]$status.elapsedSeconds}catch{0});logFile=[string]$status.logFile;workDirectory=[string]$status.workDirectory;nextRefreshLocal=(Get-NextDxfRefreshLocal)}}
-  }
-  if($req.Path -eq '/api/dxf-refresh' -and $req.Method -eq 'POST'){
-    $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
-    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
-    $status=Get-DxfStatus
-    if([string]$status.state -eq 'RUNNING'){
-      return [pscustomobject]@{Status=200;Data=@{ok=$true;started=$false;dxfStatus=$status;message='A DXF indexing run is already active.'}}
-    }
-    $status=Start-DxfScan -root $dxfRoot -mode 'REFRESH' -force
-    return [pscustomobject]@{Status=200;Data=@{ok=$true;started=$true;dxfStatus=$status;message='DXF refresh started in the background using controlled parallel workers.'}}
-  }
-  if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
+
+function Prepare-SigmaNestBuild($b){
+
     $b=$req.Body|ConvertFrom-Json
     $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
     $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
@@ -1027,19 +1001,19 @@ function Handle-Request($req){
     $missing=@($parts|Where-Object {$_.status -eq 'MISSING'})
     if($importable.Count -eq 0){
       return [pscustomobject]@{
-        Status=200
-        Data=@{
-          outputDir=$staging
-          message="No geometry could be imported into SigmaNEST. $($missing.Count) part(s) have missing geometry."
-          parts=$parts
-          reviewCount=$review.Count
-          reviewBreakdown=$reviewBreakdown
-          sigmaNestCreated=$false
-          sigmaPartCount=0
-          importedCount=0
-          missingCount=$missing.Count
-          taskPlan=@()
-        }
+        noGeometry=$true
+        outputDir=$staging
+        message="No geometry could be imported into SigmaNEST. $($missing.Count) part(s) have missing geometry."
+        parts=$parts
+        reviewCount=$review.Count
+        reviewBreakdown=$reviewBreakdown
+        sigmaNestCreated=$false
+        sigmaPartCount=0
+        importedCount=0
+        missingCount=$missing.Count
+        taskPlan=@()
+        jobName=$name
+        selectedSheets=@($b.selectedSheetNames)
       }
     }
 
@@ -1084,21 +1058,70 @@ function Handle-Request($req){
         }
       })
     }
+
+    return [pscustomobject]@{
+      noGeometry=$false
+      outputDir=$staging
+      message=$(if($review.Count -gt 0){
+        "SigmaNEST job accepted. $($importable.Count) of $($parts.Count) CL part(s) have geometry and are ready for background SigmaNEST import. $($review.Count) part(s) require attention and will be listed in Part Review."
+      }else{
+        "SigmaNEST job accepted. All $($parts.Count) CL part(s) have geometry and are ready for background SigmaNEST import."
+      })
+      parts=$parts
+      reviewCount=$review.Count
+      reviewBreakdown=$reviewBreakdown
+      sigmaNestCreated=$false
+      wsPath=''
+      sigmaPartCount=0
+      importedCount=0
+      missingCount=$missing.Count
+      taskPlan=@($taskPlan)
+      engineRequest=$engineRequest
+      jobName=$name
+      selectedSheets=@($b.selectedSheetNames)
+    }
+}
+function Handle-Request($req){
+  if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
+  if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;port=$PORT;bridgeVersion=$BRIDGE_VERSION;libraryRoot=$CFG['libraryRoot'];dxfRoot=$CFG['dxfRoot'];lastScan=$CFG['lastScan'];count=[int]$CFG['count'];discoveredFiles=[int]$CFG['discoveredFiles'];prsCount=[int]$CFG['prsCount'];dxfCount=[int]$CFG['dxfCount'];dxfIndexState=[string]$CFG['dxfIndexState'];dxfIndexMessage=[string]$CFG['dxfIndexMessage'];sigmaNestCom=$true;bridge='PowerShell'}}
+  }
+  if($req.Path -eq '/api/scan' -and $req.Method -eq 'POST'){
+    $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
+    $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
+    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
+    # Start the huge DXF walk in a background PowerShell process; never wait on Y:\ here.
+    $dxfStatus=Start-DxfScan -root $dxfRoot
+    $diag=Scan-Libraries -prsRoot $prsRoot -dxfRoot $dxfRoot
+    return [pscustomobject]@{Status=200;Data=@{count=$diag.count;discoveredFiles=$diag.discoveredFiles;prsCount=$diag.prsCount;dxfCount=$diag.dxfCount;dxfIndexedCount=$dxfStatus.filesFound;dxfStatus=$dxfStatus;scanErrors=$diag.scanErrors;inspectErrors=$diag.inspectErrors;prsRoot=$diag.prsRoot;dxfRoot=$diag.dxfRoot}}
+  }
+  if($req.Path -eq '/api/dxf-status' -and $req.Method -eq 'GET'){
+    $status=Get-DxfStatus
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;state=[string]$status.state;indexerVersion=[string]$status.indexerVersion;root=[string]$status.root;filesFound=[int]$status.filesFound;errors=[int]$status.errors;message=[string]$status.message;mode=[string]$status.mode;started=$status.started;finished=$status.finished;generatedUtc=$status.generatedUtc;currentPath=[string]$status.currentPath;pid=$(try{[int]$status.pid}catch{0});exitCode=$(try{[int]$status.exitCode}catch{0});workers=$(try{[int]$status.workers}catch{[int]$CFG['dxfWorkers']});workersCompleted=$(try{[int]$status.workersCompleted}catch{0});directoriesVisited=$(try{[int]$status.directoriesVisited}catch{0});elapsedSeconds=$(try{[double]$status.elapsedSeconds}catch{0});logFile=[string]$status.logFile;workDirectory=[string]$status.workDirectory;nextRefreshLocal=(Get-NextDxfRefreshLocal)}}
+  }
+  if($req.Path -eq '/api/dxf-refresh' -and $req.Method -eq 'POST'){
+    $b=if($req.Body){$req.Body|ConvertFrom-Json}else{[pscustomobject]@{}}
+    $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
+    $status=Get-DxfStatus
+    if([string]$status.state -eq 'RUNNING'){
+      return [pscustomobject]@{Status=200;Data=@{ok=$true;started=$false;dxfStatus=$status;message='A DXF indexing run is already active.'}}
+    }
+    $status=Start-DxfScan -root $dxfRoot -mode 'REFRESH' -force
+    return [pscustomobject]@{Status=200;Data=@{ok=$true;started=$true;dxfStatus=$status;message='DXF refresh started in the background using controlled parallel workers.'}}
+  }
+  if($req.Path -eq '/api/build-job' -and $req.Method -eq 'POST'){
+    $b=$req.Body|ConvertFrom-Json
+    if($null -eq $b){throw 'Build request body is required.'}
     $workerRequest=[pscustomobject]@{
       jobId=''
       statusFile=''
-      jobName=$name
-      outputDir=$staging
+      jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
+      outputDir=''
       selectedSheets=@($b.selectedSheetNames)
-      reportParts=$reportParts
-      engineRequest=$engineRequest
+      reportParts=@($b.parts)
+      buildRequest=$b
     }
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-    $reviewText=if($review.Count -gt 0){
-      "SigmaNEST job accepted. $($importable.Count) of $($parts.Count) CL part(s) have geometry and are being imported in the background. $($review.Count) part(s) require attention and will be listed in Part Review."
-    }else{
-      "SigmaNEST job accepted. All $($parts.Count) CL part(s) have geometry and are being imported in the background."
-    }
     return [pscustomobject]@{
       Status=202
       Data=@{
@@ -1107,17 +1130,8 @@ function Handle-Request($req){
         jobId=$workerInfo.jobId
         pid=$workerInfo.pid
         started=$workerInfo.started
-        outputDir=$staging
-        message=$reviewText
-        parts=$parts
-        reviewCount=$review.Count
-        reviewBreakdown=$reviewBreakdown
-        sigmaNestCreated=$false
-        wsPath=''
-        sigmaPartCount=0
-        importedCount=0
-        missingCount=$missing.Count
-        taskPlan=@($taskPlan)
+        outputDir=''
+        message='SigmaNEST job accepted. Matching, geometry staging and SigmaNEST creation are running in the background.'
       }
     }
   }
@@ -1130,32 +1144,35 @@ function Handle-Request($req){
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
 }
 
-$listener = New-Object -TypeName Net.Sockets.TcpListener -ArgumentList ([Net.IPAddress]::Loopback,$PORT)
-$listener.Start()
-Write-Host "CL-WS-Creator PowerShell bridge listening on http://127.0.0.1:$PORT"
-Write-Host "PRS library default: $DEFAULT_LIBRARY"
-Write-Host "DXF library default: $DEFAULT_DXF_LIBRARY"
-Write-Host "DXF workers: $(Get-DxfWorkerCount); nightly refresh hour: $($CFG['dxfNightlyHour'])"
-Initialize-DxfScheduler
-$lastSchedulerCheck=Get-Date
-while($true){
-  $acceptTask=$listener.AcceptTcpClientAsync()
-  while(-not $acceptTask.Wait(1000)){
+if(-not $LibraryOnly){
+  $listener = New-Object -TypeName Net.Sockets.TcpListener -ArgumentList ([Net.IPAddress]::Loopback,$PORT)
+  $listener.Start()
+  Write-Host "CL-WS-Creator PowerShell bridge listening on http://127.0.0.1:$PORT"
+  Write-Host "PRS library default: $DEFAULT_LIBRARY"
+  Write-Host "DXF library default: $DEFAULT_DXF_LIBRARY"
+  Write-Host "DXF workers: $(Get-DxfWorkerCount); nightly refresh hour: $($CFG['dxfNightlyHour'])"
+  Initialize-DxfScheduler
+  $lastSchedulerCheck=Get-Date
+  while($true){
+    $acceptTask=$listener.AcceptTcpClientAsync()
+    while(-not $acceptTask.Wait(1000)){
+      if(((Get-Date)-$lastSchedulerCheck).TotalSeconds -ge 30){
+        Invoke-DxfScheduler
+        $lastSchedulerCheck=Get-Date
+      }
+    }
     if(((Get-Date)-$lastSchedulerCheck).TotalSeconds -ge 30){
       Invoke-DxfScheduler
       $lastSchedulerCheck=Get-Date
     }
+    $client=$acceptTask.Result
+    try{
+      $req=Read-HttpRequest $client
+      try{$resp=Handle-Request $req}catch{$resp=[pscustomobject]@{Status=500;Data=@{error=$_.Exception.Message}}}
+      Send-Json $client $resp.Status $resp.Data
+    }catch{
+      try{Send-Json $client 500 @{error=$_.Exception.Message}}catch{}
+    }
   }
-  if(((Get-Date)-$lastSchedulerCheck).TotalSeconds -ge 30){
-    Invoke-DxfScheduler
-    $lastSchedulerCheck=Get-Date
-  }
-  $client=$acceptTask.Result
-  try{
-    $req=Read-HttpRequest $client
-    try{$resp=Handle-Request $req}catch{$resp=[pscustomobject]@{Status=500;Data=@{error=$_.Exception.Message}}}
-    Send-Json $client $resp.Status $resp.Data
-  }catch{
-    try{Send-Json $client 500 @{error=$_.Exception.Message}}catch{}
-  }
+  
 }
