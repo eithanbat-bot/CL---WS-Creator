@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.9.5'
+$BRIDGE_VERSION = '2.9.6'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -1018,75 +1018,53 @@ function Handle-Request($req){
         throw ('SigmaNEST creator parser check failed: '+$parseText)
       }
 
-      # Run the SigmaNEST creator as a real child process so its exit code,
-      # stdout and stderr are preserved even when COM initialization crashes.
-      $psi=New-Object System.Diagnostics.ProcessStartInfo
-      $psi.FileName=Get-PowerShellExe
-      $psi.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "'+$localWorker+'" -RequestFile "'+$localRequest+'" -ResultFile "'+$localResult+'"'
-      $psi.WorkingDirectory=$runDir
-      $psi.UseShellExecute=$false
-      $psi.CreateNoWindow=$true
-      $psi.RedirectStandardOutput=$true
-      $psi.RedirectStandardError=$true
-      $proc=New-Object System.Diagnostics.Process
-      $proc.StartInfo=$psi
-      [void]$proc.Start()
-      $stdoutTask=$proc.StandardOutput.ReadToEndAsync()
-      $stderrTask=$proc.StandardError.ReadToEndAsync()
-      if(-not $proc.WaitForExit(600000)){
-        try{$proc.Kill()}catch{}
-        throw 'SigmaNEST creator timed out after 10 minutes.'
+      # The bridge is launched in STA mode so SigmaNEST COM runs in the
+      # correct apartment. Invoke the creator in this process instead of
+      # crossing another PowerShell process boundary.
+      $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
+      $creatorErr=Join-Path $BridgeDir ('_creator-err-'+[Guid]::NewGuid().ToString('N')+'.txt')
+      $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
+      try{
+        & $localWorker -RequestFile $localRequest -ResultFile $localResult | Out-File -LiteralPath $creatorOut -Encoding UTF8
+      }catch{
+        [string]$_.Exception.ToString()|Set-Content -LiteralPath $creatorErr -Encoding UTF8
+        throw
       }
-      $stdout=$stdoutTask.GetAwaiter().GetResult()
-      $stderr=$stderrTask.GetAwaiter().GetResult()
-      $exitCode=$proc.ExitCode
-      $proc.Dispose()
+
+      $rawText=''
+      $errText=''
       if(Test-Path -LiteralPath $localResult){
+        try{$rawText=[string](Get-Content -LiteralPath $localResult -Raw -Encoding UTF8).Trim()}catch{}
         try{Copy-Item -LiteralPath $localResult -Destination $creatorResult -Force}catch{}
       }
-      [string]$stdout|Set-Content -LiteralPath $creatorOut -Encoding UTF8
-      [string]$stderr|Set-Content -LiteralPath $creatorErr -Encoding UTF8
-      $rawText=([string]$stdout).Trim()
-      $errText=([string]$stderr).Trim()
-      if([string]::IsNullOrWhiteSpace($rawText) -and (Test-Path -LiteralPath $creatorResult)){
-        try{$rawText=[string](Get-Content -LiteralPath $creatorResult -Raw -Encoding UTF8).Trim()}catch{}
-      }
       if([string]::IsNullOrWhiteSpace($rawText)){
-        # Never leave an empty creator-result file. If the child process failed
-        # before its own script-level diagnostics could run, persist the parent
-        # process facts so the next failure is immediately actionable.
-        if(-not (Test-Path -LiteralPath $creatorResult) -or [string]::IsNullOrWhiteSpace([string](Get-Content -LiteralPath $creatorResult -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))){
-          try{
-            [ordered]@{
-              ok=$false
-              phase='CHILD_PROCESS'
-              exitCode=$exitCode
-              worker=$worker
-              requestFile=$reqFile
-              localWorker=$localWorker
-              localRequest=$localRequest
-              localResult=$localResult
-              stdout=$stdout
-              stderr=$stderr
-              message='SigmaNEST creator process exited without returning JSON.'
-            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $creatorResult -Encoding UTF8
-          }catch{}
+        $detail='SigmaNEST creator returned no result from the in-process STA invocation.'
+        if(Test-Path -LiteralPath $creatorErr){
+          $errText=[string](Get-Content -LiteralPath $creatorErr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue).Trim()
+          if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' ERROR: '+$errText}
         }
-        $detail='SigmaNEST creator returned no result. Exit code: '+$exitCode+'.'
-        if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' STDERR: '+$errText}
-        $diag=''
-        if(Test-Path -LiteralPath $creatorResult){try{$diag=[string](Get-Content -LiteralPath $creatorResult -Raw -Encoding UTF8).Trim()}catch{}}
-        if(-not [string]::IsNullOrWhiteSpace($diag)){$detail+=' Diagnostic result: '+$diag}
-        $detail+=' Creator output files: '+$creatorOut+' ; '+$creatorErr+' ; '+$creatorResult
-        throw $detail
+        if(-not (Test-Path -LiteralPath $creatorResult)){
+          [ordered]@{
+            ok=$false
+            phase='CREATOR_IN_PROCESS'
+            creatorVersion='3.5.0'
+            worker=$worker
+            localWorker=$localWorker
+            localRequest=$localRequest
+            localResult=$localResult
+            error=$detail
+          }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $creatorResult -Encoding UTF8
+        }
+        throw ($detail+' Creator output files: '+$creatorOut+' ; '+$creatorErr+' ; '+$creatorResult)
       }
+
       try{$data=$rawText|ConvertFrom-Json}catch{
-        throw ('SigmaNEST creator returned invalid JSON. Exit code: '+$exitCode+'. STDERR: '+$errText+'. STDOUT: '+$rawText)
+        throw ('SigmaNEST creator returned invalid JSON from the STA invocation: '+$_.Exception.Message)
       }
-      if($null -eq $data){throw ('SigmaNEST creator returned no result. Exit code: '+$exitCode+'. STDERR: '+$errText)}
+      if($null -eq $data){throw 'SigmaNEST creator returned no result from the STA invocation.'}
       if(-not [bool]$data.ok){
         $creatorError=[string]$data.error
-        if([string]::IsNullOrWhiteSpace($creatorError)){$creatorError='SigmaNEST creator failed. Exit code: '+$exitCode+'. STDERR: '+$errText}
+        if([string]::IsNullOrWhiteSpace($creatorError)){$creatorError='SigmaNEST creator failed in the STA invocation.'}
         throw $creatorError
       }
 
