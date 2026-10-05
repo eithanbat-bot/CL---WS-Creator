@@ -276,6 +276,7 @@ async function chooseCL(file){
     clFile=file;
     clWorkbook=await parseCLFile(file);
     sheets=clWorkbook.sheets;
+    lastActionParts=[];
     $('clearCL').disabled=false;
     renderSheets();
 
@@ -514,7 +515,7 @@ async function importGeometry(){
     if(String(ds.root||'').toUpperCase()===String(dxfRoot).toUpperCase()&&String(ds.state||'').toUpperCase()!=='COMPLETE'){
       throw new Error('DXF index is not complete yet. '+(ds.filesFound||0)+' DXFs indexed so far.');
     }
-    var parts=lastActionParts.length?lastActionParts:await readCL();
+    var parts=await readCL();
     var selectedNames=selectedSheets().map(function(x){return x.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
@@ -530,7 +531,7 @@ async function autoTaskOrder(){
   var btn=$('autoTaskOrder');btn.disabled=true;
   try{
     if(!currentWsPath)throw new Error('Import Geometry first or enter the path of an existing SigmaNEST .ws.');
-    var parts=await readCL();
+    var parts=lastActionParts.length?lastActionParts:await readCL();
     var selectedNames=selectedSheets().map(function(x){return x.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
