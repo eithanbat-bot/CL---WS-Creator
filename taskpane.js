@@ -1,7 +1,8 @@
 /* global Office, XLSX, CLParser */
 var BRIDGE='http://127.0.0.1:17832';
-var clFile=null, clWorkbook=null, sheets=[];
+var clFile=null, clWorkbook=null, sheets=[], currentWsPath='';
 var dxfMonitorTimer=null;
+try{currentWsPath=localStorage.getItem('clwsc_lastWsPath')||''}catch(e){}
 
 function $(id){return document.getElementById(id)}
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
@@ -42,10 +43,17 @@ async function bridge(path,opts){
   }
 }
 
-function setBuildEnabled(enabled){
+function setActionEnabled(enabled){
   $('preview').disabled=!enabled;
-  $('build').disabled=!enabled;
   $('refreshSheets').disabled=!enabled;
+  $('importGeometry').disabled=!enabled;
+  $('autoTaskOrder').disabled=!enabled||!currentWsPath;
+}
+function updateWorkspacePath(path){
+  currentWsPath=String(path||'').trim();
+  $('wsPath').value=currentWsPath;
+  $('autoTaskOrder').disabled=!clWorkbook||!currentWsPath;
+  try{localStorage.setItem('clwsc_lastWsPath',currentWsPath)}catch(e){}
 }
 
 function clearResults(){
@@ -64,76 +72,75 @@ function statusCount(parts, label){
   return (parts||[]).filter(function(x){return String(x.statusLabel||'')===label}).length;
 }
 
-async function writeReportSheets(result,job,selectedSheetNames){
+async function writeReportSheets(result,job,selectedSheetNames,actionName){
+  actionName=actionName||'Operation';
   var parts=result.parts||[];
   var review=parts.filter(function(x){return x.status!=='READY'});
   var ready=parts.filter(function(x){return x.status==='READY'});
   var prs=parts.filter(function(x){return String(x.sourceType||'')==='PRS'});
   var dxf=parts.filter(function(x){return String(x.sourceType||'')==='DXF'});
   var missing=parts.filter(function(x){return x.status==='MISSING'});
+  var updates=Array.isArray(result.partUpdates)?result.partUpdates:[];
+  var tasks=Array.isArray(result.taskData)?result.taskData:[];
+  var warnings=Array.isArray(result.warnings)?result.warnings:[];
   var now=new Date().toLocaleString();
 
   function rectangular(rows,cols){
     return rows.map(function(r){
-      var a=[];
-      for(var i=0;i<cols;i++)a.push(r[i]==null?'':r[i]);
-      return a;
+      var a=[];for(var i=0;i<cols;i++)a.push(r[i]==null?'':r[i]);return a;
     });
   }
 
   var summaryData=[
-    ['CL - WS Creator',''],
-    ['Job',job||''],
-    ['Generated',now],
-    ['CL workbook',clFile?clFile.name:''],
-    ['Selected CL sheets',(selectedSheetNames||[]).join(', ')],
-    ['PRS geometry root',$('libraryPath').value.trim()],
-    ['DXF geometry root',$('dxfPath').value.trim()],
-    ['',''],
-    ['RESULT','VALUE'],
-    ['Consolidated CL lines',parts.length],
-    ['Total required quantity',sumQty(parts)],
-    ['Ready status',ready.length],
-    ['Review required',review.length],
-    ['Imported into WS',(result.importedCount!=null?result.importedCount:ready.length)+" of "+parts.length],
-    ['Missing geometry',(result.missingCount!=null?result.missingCount:missing.length)],
-    ['PRS geometry matches',prs.length],
-    ['DXF geometry matches',dxf.length],
-    ['Missing geometry',missing.length],
-    ['Material mismatches',statusCount(parts,'MATERIAL MISMATCH')],
-    ['Thickness mismatches',statusCount(parts,'THICKNESS MISMATCH')],
-    ['Variation review',review.filter(function(x){return String(x.statusLabel||'').indexOf('VARIATION')>=0}).length],
-    ['Ambiguous matches',review.filter(function(x){return String(x.statusLabel||'').indexOf('AMBIGUOUS')===0}).length],
-    ['',''],
-    ['ACTION / HAND-OFF','DETAIL'],
-    ['Geometry search','Recursive .PRS search under the PRS root and indexed .DXF search under the DXF root, including all subfolders'],
-    ['SigmaNEST WS',result.wsPath||'Not created — no geometry was available to import'],
-    ['Staging folder',result.outputDir||''],
-    ['Part review sheet','See "Part Review" worksheet for every item requiring confirmation']
+    ['CL - WS Creator','', '', ''],
+    [actionName,now,'',''],
+    ['Job',job||'','Workspace',result.wsPath||currentWsPath||''],
+    ['CL workbook',clFile?clFile.name:'','Selected sheets',(selectedSheetNames||[]).join(', ')],
+    ['','','',''],
+    ['PARTS','IMPORTED','TASKS','WARNINGS'],
+    [parts.length,result.importedCount!=null?result.importedCount:(actionName==='Import Geometry'?parts.length:0),result.tasksCreated!=null?result.tasksCreated:0,warnings.length],
+    ['','','',''],
+    ['RESULT DETAIL','VALUE','RESULT DETAIL','VALUE'],
+    ['Ready',ready.length,'Review required',review.length],
+    ['Total required quantity',sumQty(parts),'Missing geometry',result.missingCount!=null?result.missingCount:missing.length],
+    ['PRS geometry',prs.length,'DXF geometry',dxf.length],
+    ['Material mismatches',statusCount(parts,'MATERIAL MISMATCH'),'Thickness mismatches',statusCount(parts,'THICKNESS MISMATCH')],
+    ['Best candidate selected',parts.filter(function(x){return String(x.selectionDecision||'')==='BEST CANDIDATE'}).length,'Candidate reviews',parts.filter(function(x){return String(x.statusLabel||'').indexOf('AMBIGUOUS')===0}).length],
+    ['CL overrides applied',updates.filter(function(x){return !(x.warnings||[]).length}).length,'Override warnings',updates.reduce(function(n,x){return n+(x.warnings||[]).length},0)],
+    ['Batch values applied',tasks.filter(function(x){return x.batchApplied}).length,'Task labels applied',tasks.filter(function(x){return x.labelApplied}).length],
+    ['','','',''],
+    ['HAND-OFF','DETAIL','',''],
+    ['Geometry source','PRS preferred; recursive DXF index used when PRS is unavailable.','',''],
+    ['CL overrides','Material, thickness and quantity are applied to the imported workspace part; the master PRS file is not overwritten.','',''],
+    ['Workspace',result.wsPath||currentWsPath||'Not available','',''],
+    ['Warnings',warnings.join(' | '),'','']
   ];
 
-  var reviewHeaders=['Part','Qty','Material','Thickness','Status','Reason','Match Type','Source Type','Source File','Source Path','PRS Material','PRS Thickness','CL Sheets'];
+  var reviewHeaders=['Part','Qty','Material','Thickness','Status','Reason','Match Type','Source Type','Source File','Source Path','PRS Material','PRS Thickness','CL Sheets','Candidate Decision','Alternatives'];
   var reviewRows=review.map(function(x){
     return [
       x.part,x.qty,x.material,x.thickness,x.statusLabel||x.status,x.reviewReason||'',
-      x.matchType||'',x.sourceType||'',x.sourcePath?String(x.sourcePath).split(/[/\\\\]/).pop():'',
+      x.matchType||'',x.sourceType||'',x.sourcePath?String(x.sourcePath).split(/[/\\]/).pop():'',
       x.sourcePath||'',x.libraryMaterial||'',x.libraryThickness||'',
-      Array.isArray(x.sourceSheets)?x.sourceSheets.join(', '):''
+      Array.isArray(x.sourceSheets)?x.sourceSheets.join(', '):'',
+      x.selectionDecision||'BEST CANDIDATE',
+      Array.isArray(x.candidateAlternatives)?x.candidateAlternatives.map(function(a){return String(a.file||'').split(/[/\\]/).pop()+' ['+a.score+']'}).join(' | '):''
     ];
   });
-  if(!reviewRows.length)reviewRows=[['No parts require review.','','','','','','','','','','','','']];
+  if(!reviewRows.length)reviewRows=[['No parts require review.','','','','','','','','','','','','','','']];
 
-  var summaryName='CL WS Summary';
-  var reviewName='Part Review';
+  var taskHeaders=['Task','Material','Thickness','Batch','Label Applied','Batch Applied','Parts','Property'];
+  var taskRows=tasks.map(function(x){
+    return [x.taskIndex,x.material,x.thickness,(x.batchMultiplier||1),'YES'===String(x.labelApplied).toUpperCase()?'YES':(x.labelApplied?'YES':'NO'),x.batchApplied?'YES':'NO',x.partCount||'',x.batchProperty||''];
+  });
+  if(!taskRows.length)taskRows=[['No tasks created','','','','','','','']];
 
-  // Recreate only the two report sheets. This avoids UsedRange/clear/merge
-  // edge cases in different Excel desktop builds.
+  var summaryName='CL WS Summary',reviewName='Part Review';
   await Excel.run(async function(context){
     var wb=context.workbook;
     var oldSummary=wb.worksheets.getItemOrNullObject(summaryName);
     var oldReview=wb.worksheets.getItemOrNullObject(reviewName);
     await context.sync();
-
     if(!oldSummary.isNullObject)oldSummary.delete();
     if(!oldReview.isNullObject)oldReview.delete();
     await context.sync();
@@ -142,19 +149,53 @@ async function writeReportSheets(result,job,selectedSheetNames){
     var reviewSheet=wb.worksheets.add(reviewName);
     await context.sync();
 
-    summarySheet.getRangeByIndexes(0,0,summaryData.length,2).values=rectangular(summaryData,2);
+    summarySheet.getRangeByIndexes(0,0,summaryData.length,4).values=rectangular(summaryData,4);
+    summarySheet.getRange('A1:D1').merge();
+    summarySheet.getRange('A2:D2').merge();
+    summarySheet.getRange('A1:D1').format.font.bold=true;
+    summarySheet.getRange('A1:D1').format.font.size=17;
+    summarySheet.getRange('A1:D1').format.font.color='#FFFFFF';
+    summarySheet.getRange('A1:D1').format.fill.color='#0B2942';
+    summarySheet.getRange('A2:D2').format.font.bold=true;
+    summarySheet.getRange('A2:D2').format.fill.color='#E7EEF5';
+    summarySheet.getRange('A6:D6').format.font.bold=true;
+    summarySheet.getRange('A6:D6').format.fill.color='#0B5CAB';
+    summarySheet.getRange('A6:D6').format.font.color='#FFFFFF';
+    summarySheet.getRange('A9:D9').format.font.bold=true;
+    summarySheet.getRange('A9:D9').format.fill.color='#E7EEF5';
+    summarySheet.getRange('A18:D18').format.font.bold=true;
+    summarySheet.getRange('A18:D18').format.fill.color='#E7EEF5';
+    summarySheet.getRange('A:A').format.columnWidth=165;
+    summarySheet.getRange('B:B').format.columnWidth=220;
+    summarySheet.getRange('C:C').format.columnWidth=165;
+    summarySheet.getRange('D:D').format.columnWidth=220;
+    summarySheet.getUsedRange().format.wrapText=true;
+    summarySheet.freezePanes.freezeRows(2);
+
     var rm=[reviewHeaders].concat(reviewRows);
     reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length).values=rectangular(rm,reviewHeaders.length);
-    await context.sync();
+    var rh=reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length);
+    rh.format.font.bold=true;rh.format.font.color='#FFFFFF';rh.format.fill.color='#0B2942';
+    reviewSheet.getUsedRange().format.wrapText=true;
+    reviewSheet.getRangeByIndexes(0,0,rm.length,reviewHeaders.length).format.autofitColumns();
+    reviewSheet.getRange('F:F').format.columnWidth=260;
+    reviewSheet.getRange('J:J').format.columnWidth=240;
+    reviewSheet.getRange('O:O').format.columnWidth=260;
+    reviewSheet.freezePanes.freezeRows(1);
 
-    summarySheet.getRange('A1:B1').format.font.bold=true;
-    summarySheet.getRange('A8:B8').format.font.bold=true;
-    summarySheet.getRange('A23:B23').format.font.bold=true;
-    reviewSheet.getRangeByIndexes(0,0,1,reviewHeaders.length).format.font.bold=true;
+    if(tasks.length){
+      var taskSheet=wb.worksheets.add('Task Release');
+      var tr=[taskHeaders].concat(taskRows);
+      taskSheet.getRangeByIndexes(0,0,tr.length,taskHeaders.length).values=rectangular(tr,taskHeaders.length);
+      var th=taskSheet.getRangeByIndexes(0,0,1,taskHeaders.length);
+      th.format.font.bold=true;th.format.font.color='#FFFFFF';th.format.fill.color='#166534';
+      taskSheet.getUsedRange().format.wrapText=true;
+      taskSheet.getUsedRange().format.autofitColumns();
+      taskSheet.freezePanes.freezeRows(1);
+    }
     await context.sync();
   });
 }
-
 
 function resetCL(){
   clFile=null;
@@ -167,9 +208,12 @@ function resetCL(){
   $('sheetList').className='sheetList empty';
   $('sheetCount').textContent='0 selected';
   $('jobName').value='';
+  updateWorkspacePath('');
   $('buildStatus').textContent='Choose a CL workbook to begin.';
   $('clearCL').disabled=true;
-  setBuildEnabled(false);
+  setActionEnabled(false);
+  $('wsPath').value=currentWsPath;
+  updateCount();
   clearResults();
 }
 
@@ -182,7 +226,7 @@ function renderSheets(){
     box.className='sheetList empty';
     box.textContent='No worksheets were found in this workbook.';
     $('sheetCount').textContent='0 selected';
-    setBuildEnabled(false);
+    setActionEnabled(false);
     return;
   }
   sheets.forEach(function(s,i){
@@ -192,16 +236,17 @@ function renderSheets(){
     box.appendChild(row);
   });
   updateCount();
-  setBuildEnabled(true);
+  setActionEnabled(true);
 }
 
 function updateCount(){
   var n=$('sheetList').querySelectorAll('input:checked').length;
   $('sheetCount').textContent=n+' selected';
   $('preview').disabled=!clWorkbook||n===0;
-  $('build').disabled=!clWorkbook||n===0;
+  $('importGeometry').disabled=!clWorkbook||n===0;
+  $('autoTaskOrder').disabled=!clWorkbook||n===0||!currentWsPath;
+  $('refreshSheets').disabled=!clWorkbook;
 }
-
 function parseCLFile(file){
   return new Promise(function(resolve,reject){
     if(!window.XLSX)return reject(new Error('The Excel file parser did not load. Refresh the add-in and try again.'));
@@ -397,148 +442,103 @@ function reviewBreakdownText(breakdown){
 
 function sleep(ms){return new Promise(function(resolve){window.setTimeout(resolve,ms)})}
 
-async function waitForBuild(jobId,job,selectedNames){
+async function waitForBuild(jobId,job,selectedNames,actionName){
   var reportWritten=false;
   while(true){
     var s=await bridge('/api/build-status/'+encodeURIComponent(jobId),{timeoutMs:10000});
+    var state=String(s.state||'').toUpperCase(), phase=s.phase||'WORKING';
     var elapsed=Number(s.elapsedSeconds)||0;
-    if(String(s.state||'').toUpperCase()==='RUNNING' || String(s.state||'').toUpperCase()==='STARTING'){
-      var phase=s.phase||'WORKING';
-      var detail=s.message||'SigmaNEST background worker is running.';
-      if(String(phase).toUpperCase()==='PREPARED' && !reportWritten && Array.isArray(s.parts)){
-        var interim={
-          parts:s.parts,
-          outputDir:s.outputDir||'',
-          wsPath:s.wsPath||'',
-          reviewCount:s.reviewCount||0,
-          reviewBreakdown:s.reviewBreakdown||{},
-          importedCount:0,
-          missingCount:s.missingCount||0
-        };
-        try{
-          await writeReportSheets(interim,job,selectedNames);
-          reportWritten=true;
-          detail+=' Summary and Part Review are now written to this workbook.';
-        }catch(e){
-          detail+=' Report sheets will be retried: '+(e&&e.message?e.message:String(e));
-        }
+
+    if(state==='RUNNING'||state==='STARTING'){
+      var detail=s.message||actionName+' is running.';
+      if(!reportWritten&&String(phase).toUpperCase()==='PREPARED'&&Array.isArray(s.parts)){
+        var interim=s.result||{};interim.parts=s.parts;interim.outputDir=s.outputDir||'';interim.wsPath=s.wsPath||currentWsPath;
+        try{await writeReportSheets(interim,job,selectedNames,actionName);reportWritten=true;detail+=' Summary updated.';}catch(e){}
       }
-      $('buildStatus').textContent=detail+' Elapsed: '+Math.floor(elapsed)+'s. Phase: '+phase+'.';
-      pill('Building job','neutral');
+      $('buildStatus').textContent=detail+' Elapsed: '+Math.floor(elapsed)+'s.';
+      pill(actionName+' running','neutral');
       await sleep(2500);
       continue;
     }
 
-    var finalResult=s.result||{};
-    finalResult.parts=s.parts||finalResult.parts||[];
-    finalResult.outputDir=s.outputDir||finalResult.outputDir||'';
-    finalResult.wsPath=finalResult.wsPath||s.wsPath||'';
-    finalResult.importedCount=finalResult.importedCount!=null?finalResult.importedCount:(s.importedCount!=null?s.importedCount:(finalResult.partCount!=null?finalResult.partCount:0));
-    finalResult.missingCount=finalResult.missingCount!=null?finalResult.missingCount:(s.missingCount!=null?s.missingCount:0);
-    finalResult.reviewCount=finalResult.reviewCount!=null?finalResult.reviewCount:(s.reviewCount!=null?s.reviewCount:0);
-    finalResult.reviewBreakdown=finalResult.reviewBreakdown||s.reviewBreakdown||{};
+    var result=s.result||{};
+    result.parts=s.parts||result.parts||[];
+    result.outputDir=s.outputDir||result.outputDir||'';
+    result.wsPath=result.wsPath||s.wsPath||currentWsPath||'';
+    result.importedCount=result.importedCount!=null?result.importedCount:(s.importedCount!=null?s.importedCount:0);
+    result.missingCount=result.missingCount!=null?result.missingCount:(s.missingCount!=null?s.missingCount:0);
+    result.tasksCreated=result.tasksCreated!=null?result.tasksCreated:(s.tasksCreated!=null?s.tasksCreated:0);
+    result.taskData=result.taskData||s.taskData||[];
+    result.partUpdates=result.partUpdates||s.partUpdates||[];
+    result.warnings=result.warnings||s.warnings||[];
+    result.reviewCount=result.reviewCount!=null?result.reviewCount:(s.reviewCount!=null?s.reviewCount:0);
+    result.reviewBreakdown=result.reviewBreakdown||s.reviewBreakdown||{};
 
-    var out=finalResult.parts||[];
-    showParts(out,'build');
+    showParts(result.parts,'build');
+    if(result.wsPath)updateWorkspacePath(result.wsPath);
 
-    var imported=Number(finalResult.importedCount)||0;
-    var missing=Number(finalResult.missingCount)||out.filter(function(x){return x.status==='MISSING'}).length;
-    var reviewCount=Number(finalResult.reviewCount)||out.filter(function(x){return x.status!=='READY'}).length;
-    $('geometryFound').textContent=imported;
-    $('geometryMissing').textContent=reviewCount;
-    $('totalQty').textContent=sumQty(out);
+    $('geometryFound').textContent=Number(result.importedCount)||0;
+    $('geometryMissing').textContent=Number(result.reviewCount)||result.parts.filter(function(x){return x.status!=='READY'}).length;
+    $('totalQty').textContent=sumQty(result.parts);
 
-    var state=String(s.state||'').toUpperCase();
     if(state==='COMPLETE'){
-      var msg=s.message||finalResult.message||'SigmaNEST job completed.';
-      if(finalResult.wsPath)msg+=' WS: '+finalResult.wsPath+'.';
-      msg+=' Imported into WS: '+imported+' of '+out.length+'.';
-      if(missing>0)msg+=' Missing geometry: '+missing+'.';
-      if(reviewCount>0 && Object.keys(finalResult.reviewBreakdown||{}).length){
-        msg+=' Reasons: '+reviewBreakdownText(finalResult.reviewBreakdown)+'.';
-      }
-
-      try{
-        await writeReportSheets(finalResult,job,selectedNames);
-        msg+=' Summary and Part Review sheets written to this workbook.';
-      }catch(e){
-        var reportError=e&&e.message?e.message:String(e);
-        msg+=' (Could not write report sheets: '+reportError+')';
-      }
-
-      $('buildStatus').textContent=msg+' Completed in '+Math.floor(Number(s.elapsedSeconds)||0)+'s.';
-      pill(reviewCount?'Review required':'Job created',reviewCount?'warn':'ok');
-      return finalResult;
+      $('releaseTitle').textContent=actionName+' complete';
+      $('releaseDetail').textContent=(result.message||'Operation completed.')+' '+(result.wsPath||'');
+      try{await writeReportSheets(result,job,selectedNames,actionName);}catch(e){}
+      pill(result.warnings&&result.warnings.length?'Completed with warnings':'Completed','ok');
+      $('buildStatus').textContent=(result.message||actionName+' completed.')+' Release Summary updated.';
+      return result;
     }
 
-    // A failed worker may still have created geometry before its final error.
-    var failMsg=s.message||finalResult.error||'SigmaNEST background build failed.';
-    try{
-      await writeReportSheets(finalResult,job,selectedNames);
-      failMsg+=' A Summary and Part Review were written from the completed diagnostic state.';
-    }catch(e){
-      failMsg+=' (Could not write report sheets: '+(e&&e.message?e.message:String(e))+')';
-    }
-    $('buildStatus').textContent=failMsg+' Elapsed: '+Math.floor(Number(s.elapsedSeconds)||0)+'s.';
-    pill('Build failed','bad');
-    throw new Error(failMsg);
+    $('releaseTitle').textContent=actionName+' failed';
+    $('releaseDetail').textContent=s.message||result.error||'Operation failed.';
+    try{await writeReportSheets(result,job,selectedNames,actionName);}catch(e){}
+    pill('Operation failed','bad');
+    throw new Error(s.message||result.error||actionName+' failed.');
   }
 }
 
-async function build(){
-  var btn=$('build');
-  btn.disabled=true;
-  pill('Starting job','neutral');
-  $('buildStatus').textContent='Matching geometry and starting the SigmaNEST background job...';
+async function runAction(endpoint,body,actionName){
+  $('buildStatus').textContent=actionName+' accepted. Starting background operation...';
+  var r=await bridge(endpoint,{method:'POST',timeoutMs:30000,body:JSON.stringify(body)});
+  if(!r.accepted||!r.jobId)throw new Error(r.message||('The bridge did not accept '+actionName+'.'));
+  return await waitForBuild(r.jobId,body.jobName||$('jobName').value.trim()||'CL_JOB',body.selectedSheetNames||selectedSheets().map(function(x){return x.name}),actionName);
+}
+
+async function importGeometry(){
+  var btn=$('importGeometry');btn.disabled=true;
   try{
-    var dxfRoot=$('dxfPath').value.trim()||'Y:\\';
-    var dxfStatus=await bridge('/api/dxf-status',{timeoutMs:4000});
-    if(String(dxfStatus.root||'').toUpperCase()===String(dxfRoot).toUpperCase() && String(dxfStatus.state||'').toUpperCase()!=='COMPLETE'){
-      var dsCount=Number(dxfStatus.filesFound)||0;
-      $('buildStatus').textContent='DXF index is still '+String(dxfStatus.state||'not ready').toLowerCase()+' under '+dxfRoot+'. '+dsCount+' DXF files indexed so far. Wait for the index to complete, then create the SigmaNEST job.';
-      pill('DXF index not ready','warn');
-      return;
+    var dxfRoot=$('dxfPath').value.trim()||'Y:\';
+    var ds=await bridge('/api/dxf-status',{timeoutMs:4000});
+    if(String(ds.root||'').toUpperCase()===String(dxfRoot).toUpperCase()&&String(ds.state||'').toUpperCase()!=='COMPLETE'){
+      throw new Error('DXF index is not complete yet. '+(ds.filesFound||0)+' DXFs indexed so far.');
     }
-
     var parts=await readCL();
-    var selectedNames=selectedSheets().map(function(s){return s.name});
-    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
+    var selectedNames=selectedSheets().map(function(x){return x.name});
+    var prsRoot=$('libraryPath').value.trim()||'S:\SNDataX1\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
-
-    var r=await bridge('/api/build-job',{
-      method:'POST',
-      timeoutMs:30000,
-      body:JSON.stringify({
-        prsRoot:prsRoot,
-        dxfRoot:dxfRoot,
-        jobName:job,
-        selectedSheetNames:selectedNames,
-        parts:parts
-      })
-    });
-
-    if(!r.accepted || !r.jobId){
-      throw new Error(r.message||'The bridge did not accept the SigmaNEST background job.');
-    }
-
-    $('buildStatus').textContent=(r.message||'SigmaNEST job accepted.')+' Job ID: '+r.jobId+'. The build will continue independently of the Excel request timeout.';
-    pill('Building job','neutral');
-
-    // The HTTP request is now complete. From this point onward Excel only
-    // polls short status requests, so a long SigmaNEST build cannot time out
-    // the original build operation.
-    await waitForBuild(r.jobId,job,selectedNames);
+    updateWorkspacePath('');
+    var result=await runAction('/api/import-geometry',{prsRoot:prsRoot,dxfRoot:dxfRoot,jobName:job,selectedSheetNames:selectedNames,parts:parts},'Import Geometry');
+    if(result.wsPath)updateWorkspacePath(result.wsPath);
   }catch(e){
-    $('buildStatus').textContent=e.message;
-    if(e&&e.message&&e.message.indexOf('DXF index')>=0)pill('DXF index not ready','warn');
-    else if(e&&e.message&&e.message.indexOf('Cannot connect')>=0)pill('Bridge error','bad');
-    else if(String($('statusPill').textContent||'')!=='Build failed')pill('Build error','bad');
-  }finally{
-    updateCount();
-  }
+    $('buildStatus').textContent=e.message;pill('Import failed','bad');
+  }finally{updateCount();}
 }
 
-/* Checks the local bridge, never hangs: always ends on a clear status. */
+async function autoTaskOrder(){
+  var btn=$('autoTaskOrder');btn.disabled=true;
+  try{
+    if(!currentWsPath)throw new Error('Import Geometry first or enter the path of an existing SigmaNEST .ws.');
+    var parts=await readCL();
+    var selectedNames=selectedSheets().map(function(x){return x.name});
+    var prsRoot=$('libraryPath').value.trim()||'S:\SNDataX1\PARTS';
+    var job=$('jobName').value.trim()||'CL_JOB';
+    await runAction('/api/autotask-label',{prsRoot:prsRoot,wsPath:currentWsPath,jobName:job,selectedSheetNames:selectedNames,parts:parts},'AutoTask + Order Label');
+  }catch(e){
+    $('buildStatus').textContent=e.message;pill('AutoTask failed','bad');
+  }finally{updateCount();}
+}
+
 async function checkBridge(){
   try{
     var h=await bridge('/api/health',{timeoutMs:4000});
@@ -568,9 +568,11 @@ function init(){
   $('scanLibrary').addEventListener('click',scan);
   $('refreshDxf').addEventListener('click',refreshDxf);
   $('preview').addEventListener('click',preview);
-  $('build').addEventListener('click',build);
+  $('importGeometry').addEventListener('click',importGeometry);
+  $('autoTaskOrder').addEventListener('click',autoTaskOrder);
+  $('wsPath').addEventListener('change',function(){updateWorkspacePath($('wsPath').value)});
   $('statusPill').addEventListener('click',checkBridge);
-  setBuildEnabled(false);
+  setActionEnabled(false);
   pill('Starting...','neutral');
   checkBridge();
 }
