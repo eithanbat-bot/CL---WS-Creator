@@ -1,6 +1,6 @@
 /* global Office, XLSX, CLParser */
 var BRIDGE='http://127.0.0.1:17832';
-var clFile=null, clWorkbook=null, sheets=[], currentWsPath='';
+var clFile=null, clWorkbook=null, sheets=[], currentWsPath='', lastActionParts=[];
 var dxfMonitorTimer=null;
 try{currentWsPath=localStorage.getItem('clwsc_lastWsPath')||''}catch(e){}
 
@@ -474,6 +474,7 @@ async function waitForBuild(jobId,job,selectedNames,actionName){
     result.reviewCount=result.reviewCount!=null?result.reviewCount:(s.reviewCount!=null?s.reviewCount:0);
     result.reviewBreakdown=result.reviewBreakdown||s.reviewBreakdown||{};
 
+    lastActionParts=Array.isArray(result.parts)?result.parts:[];
     showParts(result.parts,'build');
     if(result.wsPath)updateWorkspacePath(result.wsPath);
 
@@ -513,7 +514,7 @@ async function importGeometry(){
     if(String(ds.root||'').toUpperCase()===String(dxfRoot).toUpperCase()&&String(ds.state||'').toUpperCase()!=='COMPLETE'){
       throw new Error('DXF index is not complete yet. '+(ds.filesFound||0)+' DXFs indexed so far.');
     }
-    var parts=await readCL();
+    var parts=lastActionParts.length?lastActionParts:await readCL();
     var selectedNames=selectedSheets().map(function(x){return x.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\SNDataX1\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
