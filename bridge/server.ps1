@@ -989,7 +989,7 @@ function Get-BuildStatusPath([string]$jobId){
           sheet=[string]$p0.sheet
           batchMultiplier=$(if($p0.batchMultiplier){$p0.batchMultiplier}else{1})
           part=[string]$p0.part
-          qty=[double]$p0.qty
+          qty=[double]$(if($p0.vehicleQty){$p0.vehicleQty}else{$p0.qty})
         }
       }
     }
@@ -1054,6 +1054,13 @@ function Get-BuildStatusPath([string]$jobId){
         taskPlan=@($taskPlan)
       }
     }
+
+  if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
+    $jobId=$Matches[1]
+    $status=Read-BuildStatus -jobId $jobId
+    if($null -eq $status){return [pscustomobject]@{Status=404;Data=@{error='Build job not found.';jobId=$jobId}}}
+    return [pscustomobject]@{Status=200;Data=$status}
+  }
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
 }
 
@@ -1079,14 +1086,7 @@ while($true){
   }
   $client=$acceptTask.Result
   try{
-    $req=Read-HttpR
-  if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
-    $jobId=$Matches[1]
-    $status=Read-BuildStatus -jobId $jobId
-    if($null -eq $status){return [pscustomobject]@{Status=404;Data=@{error='Build job not found.';jobId=$jobId}}}
-    return [pscustomobject]@{Status=200;Data=$status}
-  }
-equest $client
+    $req=Read-HttpRequest $client
     try{$resp=Handle-Request $req}catch{$resp=[pscustomobject]@{Status=500;Data=@{error=$_.Exception.Message}}}
     Send-Json $client $resp.Status $resp.Data
   }catch{
@@ -1117,12 +1117,19 @@ function Start-SigmaNestBuildWorker($request){
   }
   $started=(Get-Date).ToUniversalTime()
   $initial=[ordered]@{
-    jobId=$jobId; state='STARTING'; phase='QUEUED'
+    jobId=$jobId
+    state='STARTING'
+    phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.11.1'; pid=$null
-    started=$started.ToString('o'); finished=$null; elapsedSeconds=0
-    result=$null; parts=@($request.reportParts)
-    outputDir=[string]$request.outputDir; jobName=[string]$request.jobName
+    workerVersion='2.11.1'
+    pid=$null
+    started=$started.ToString('o')
+    finished=$null
+    elapsedSeconds=0
+    result=$null
+    parts=@($request.reportParts)
+    outputDir=[string]$request.outputDir
+    jobName=[string]$request.jobName
     selectedSheets=@($request.selectedSheets)
   }
   Write-BuildStatus -statusFile $statusFile -obj $initial
@@ -1155,6 +1162,7 @@ function Read-BuildStatus([string]$jobId){
   try{return (Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8|ConvertFrom-Json)}
   catch{return [pscustomobject]@{jobId=$jobId;state='RUNNING';phase='STATUS_READ';message='Build status is being written; retry shortly.'}}
 }
+
 function Handle-Request($req){
   if($req.Method -eq 'OPTIONS'){return [pscustomobject]@{Status=204;Data=@{}}}
   if($req.Path -eq '/api/health' -and $req.Method -eq 'GET'){
