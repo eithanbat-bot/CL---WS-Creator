@@ -74,9 +74,9 @@ function SN-Add-Geometry($app,[string]$sourcePath,[string]$sourceType){
 }
 
 function SN-Set-TaskPartQuantity($app,$requestParts){
-  $tasks=@()
-  try{$tasks=@($app.TasksList)}catch{}
-  if($tasks.Count -eq 0){
+  $taskCount=0
+  try{$taskCount=[int]$app.TasksList.Count}catch{}
+  if($taskCount -le 0){
     throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL quantities safely.'
   }
 
@@ -86,36 +86,44 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
     if($quantity -lt 1){$quantity=1}
     $matched=$false
 
-    foreach($task in $tasks){
-      $taskParts=$null
-      try{$taskParts=$task.PartsList}catch{}
-      if($null -eq $taskParts){continue}
+    for($ti=0;$ti -lt $taskCount -and -not $matched;$ti++){
+      $task=$null
+      try{$task=$app.TasksList.Items($ti)}catch{continue}
+      if($null -eq $task){continue}
 
-      foreach($taskPart in @($taskParts)){
+      $taskPartCount=0
+      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
+      if($taskPartCount -le 0){continue}
+
+      for($pi=0;$pi -lt $taskPartCount -and -not $matched;$pi++){
+        $taskPart=$null
+        try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
+        if($null -eq $taskPart){continue}
+
         $taskPartName=''
         try{$taskPartName=[string]$taskPart.Name}catch{}
-        if(-not [string]::IsNullOrWhiteSpace($taskPartName) -and
-           $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){
+        if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
+        if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
 
-          $set=$null
-          foreach($propertyName in @('Quantity','Qty','QtyRequired','QtyReq','BatchQty')){
-            try{
-              $taskPart.$propertyName=$quantity
+        $set=$null
+        $readBack=$null
+        foreach($propertyName in @('Quantity','Qty','QtyRequired','QtyReq','BatchQty')){
+          try{
+            $taskPart.$propertyName=$quantity
+            $readBack=[double]$taskPart.$propertyName
+            if($readBack -eq $quantity){
               $set=$propertyName
               break
-            }catch{}
-          }
-
-          if(-not $set){
-            throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task="'+[string]$task.Name+'".')
-          }
-
-          $matched=$true
-          break
+            }
+          }catch{}
         }
-      }
 
-      if($matched){break}
+        if(-not $set){
+          throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task="'+[string]$task.Name+'".')
+        }
+
+        $matched=$true
+      }
     }
 
     if(-not $matched){
