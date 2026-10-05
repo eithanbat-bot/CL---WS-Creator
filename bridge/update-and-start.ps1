@@ -120,6 +120,35 @@ $BridgeDir=Join-Path $Root 'bridge'
 $Server=Join-Path $BridgeDir 'server.ps1'
 $BackupDir=Join-Path $BridgeDir 'backup'
 New-Item -ItemType Directory -Path $BridgeDir -Force|Out-Null
+$Launcher=Join-Path $Root 'Start Bridge Fixed.bat'
+function Update-Launcher([string]$Destination){
+  try{
+    $urls=@(
+      "https://raw.githubusercontent.com/$Repo/$Branch/Start%20Bridge%20Fixed.bat",
+      "https://github.com/$Repo/raw/refs/heads/$Branch/Start%20Bridge%20Fixed.bat"
+    )
+    $tmp=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-launcher-'+[Guid]::NewGuid().ToString('N')+'.bat')
+    foreach($u in $urls){
+      try{
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri $u -OutFile $tmp -Headers @{
+          'User-Agent'='CL-WS-Creator-Updater'
+          'Cache-Control'='no-cache'
+        }
+        if((Test-Path -LiteralPath $tmp) -and (Get-Item -LiteralPath $tmp).Length -gt 100){
+          $newText=Get-Content -LiteralPath $tmp -Raw -Encoding UTF8
+          if(-not $newText.Contains('CL - WS Creator - Bridge')){Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue;continue}
+          if(-not(Test-Path -LiteralPath $Destination) -or (Get-Hash $tmp) -ne (Get-Hash $Destination)){
+            Copy-Item -LiteralPath $tmp -Destination $Destination -Force
+            Say 'Updated local Start Bridge Fixed.bat launcher.' 'Green'
+          }
+          Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+          return
+        }
+      }catch{}
+    }
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+  }catch{}
+}
 
 Say "Installed bridge version: $(Get-Version $Server)"
 $tmpRoot=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-update-'+[Guid]::NewGuid().ToString('N'))
@@ -269,6 +298,8 @@ try{
 }finally{
   Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+Update-Launcher -Destination $Launcher
 
 if(-not(Test-Path -LiteralPath $Server)){
   Say 'No working Creator bridge is installed.' 'Red'
