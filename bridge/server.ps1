@@ -772,6 +772,14 @@ function Invoke-DxfScheduler(){
   }catch{}
 }
 
+function Write-BuildStatus($statusFile,$obj){
+  $dir=Split-Path -Parent $statusFile
+  New-Item -ItemType Directory -Path $dir -Force|Out-Null
+  $tmp=$statusFile+'.tmp-'+[Guid]::NewGuid().ToString('N')
+  ($obj|ConvertTo-Json -Depth 30)|Set-Content -LiteralPath $tmp -Encoding UTF8
+  Move-Item -LiteralPath $tmp -Destination $statusFile -Force
+}
+
 function Get-BuildStatusPath([string]$jobId){
   if([string]::IsNullOrWhiteSpace($jobId)){throw 'Build job ID is required.'}
   if($jobId -notmatch '^[0-9a-fA-F-]{36}
