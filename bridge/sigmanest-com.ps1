@@ -130,19 +130,130 @@ function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',$
   }
   return $null
 }
+function SN-ComPropertyNames($obj){
+  if($null -eq $obj){return @()}
+  try{
+    return @($obj | Get-Member -MemberType Property -ErrorAction Stop | Select-Object -ExpandProperty Name -Unique)
+  }catch{return @()}
+}
+function SN-ComMethodNames($obj){
+  if($null -eq $obj){return @()}
+  try{
+    return @($obj | Get-Member -MemberType Method -ErrorAction Stop | Select-Object -ExpandProperty Name -Unique)
+  }catch{return @()}
+}
+function SN-NormalizeFieldName([string]$name){
+  if($null -eq $name){return ''}
+  ($name -replace '[^A-Za-z0-9]','').ToUpperInvariant()
+}
+function SN-FieldNameMatches([string]$name,[string[]]$aliases){
+  $n=SN-NormalizeFieldName $name
+  foreach($a in @($aliases)){
+    if($n -eq (SN-NormalizeFieldName $a)){return $true}
+  }
+  return $false
+}
+function SN-Try-InvokeGetter($obj,[string]$name){
+  if($null -eq $obj -or [string]::IsNullOrWhiteSpace($name)){return $null}
+  try{
+    $m=$obj | Get-Member -MemberType Method -Name $name -ErrorAction Stop | Select-Object -First 1
+    if($m){
+      $method=$m
+      $params=@()
+      if($method.Definition -notmatch '\\([^)]*\\)'){return $null}
+      if($method.Definition -match '\\([^)]*[^\\s()]([^)]*)\\)' -and $Matches[1].Trim()){return $null}
+      return $obj.$name()
+    }
+  }catch{}
+  return $null
+}
+function SN-Try-SetDiscoveredField($obj,[string[]]$aliases,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
+  if($null -eq $obj){return $null}
+  foreach($prop in @(SN-ComPropertyNames $obj)){
+    if(-not (SN-FieldNameMatches -name $prop -aliases $aliases)){continue}
+    try{
+      $obj.$prop=$value
+      if($expectedText -ne ''){
+        if(([string]$obj.$prop).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $prop}
+      }elseif(-not [double]::IsNaN($expectedNumber)){
+        $back=SN-Scalar-Number -value $obj.$prop -default ([double]::NaN)
+        if(-not [double]::IsNaN([double]$back) -and [double]$back -eq $expectedNumber){return $prop}
+      }elseif($expectedInt -ne -2147483648){
+        $back=SN-Scalar-Int -value $obj.$prop -default -2147483648
+        if($back -eq $expectedInt){return $prop}
+      }else{return $prop}
+    }catch{}
+    try{
+      $obj.GetType().InvokeMember($prop,[Reflection.BindingFlags]::SetProperty,$null,$obj,@($value))|Out-Null
+      if($expectedText -ne ''){
+        $back=[string]$obj.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())
+        if($back.Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $prop}
+      }elseif(-not [double]::IsNaN($expectedNumber)){
+        $back=SN-Scalar-Number -value $obj.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$obj,@()) -default ([double]::NaN)
+        if(-not [double]::IsNaN([double]$back) -and [double]$back -eq $expectedNumber){return $prop}
+      }elseif($expectedInt -ne -2147483648){
+        $back=SN-Scalar-Int -value $obj.GetType().InvokeMember($prop,[Reflection.BindingFlags]::GetProperty,$null,$obj,@()) -default -2147483648
+        if($back -eq $expectedInt){return $prop}
+      }else{return $prop}
+    }catch{}
+  }
+  return $null
+}
+function SN-Set-PartFieldDiscovered($partObj,[string[]]$aliases,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
+  if($null -eq $partObj){return $null}
+  $visited=@{}
+  $queue=New-Object System.Collections.Queue
+  $queue.Enqueue([pscustomobject]@{object=$partObj;path='ROOT';depth=0})
+  while($queue.Count -gt 0){
+    $node=$queue.Dequeue()
+    $obj=$node.object;$depth=[int]$node.depth
+    if($null -eq $obj -or $depth -gt 4){continue}
+    $identity=''
+    try{$identity=[string][Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($obj)}catch{$identity=''}
+    if($identity -and $visited.ContainsKey($identity)){continue}
+    if($identity){$visited[$identity]=$true}
+
+    $hit=SN-Try-SetDiscoveredField -obj $obj -aliases $aliases -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
+    if($hit){return [pscustomobject]@{path=($node.path+'.'+$hit);object=$obj}}
+
+    if($depth -ge 4){continue}
+    foreach($prop in @(SN-ComPropertyNames $obj)){
+      if($prop -in @('OwnerList','ParentObject','Parent','Application','Owner','Geometry','PartPolyLinesList','Count','Item','Items')){continue}
+      try{
+        $child=$obj.$prop
+        if($null -eq $child -or $child -is [string] -or $child -is [ValueType]){continue}
+        if($child -is [System.Array]){
+          if($child.Count -eq 1){$child=$child[0]}else{continue}
+        }
+        $queue.Enqueue([pscustomobject]@{object=$child;path=($node.path+'.'+$prop);depth=$depth+1})
+      }catch{}
+    }
+    foreach($method in @(SN-ComMethodNames $obj | Where-Object {$_ -match '^(Get|Fetch|Read).*(Part|Param|Data|Record|Info)' -and $_ -notmatch '(Count|List|Item|Current|Owner)' })){
+      try{
+        $child=SN-Try-InvokeGetter -obj $obj -name $method
+        if($null -eq $child -or $child -is [string] -or $child -is [ValueType]){continue}
+        if($child -is [System.Array]){
+          if($child.Count -eq 1){$child=$child[0]}else{continue}
+        }
+        $queue.Enqueue([pscustomobject]@{object=$child;path=($node.path+'.'+$method+'()');depth=$depth+1})
+      }catch{}
+    }
+  }
+  return $null
+}
 function SN-Set-PartField($partObj,[string[]]$names,$value,[string]$expectedText='',$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
   $set=SN-Try-SetField -obj $partObj -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
   if($set){return [pscustomobject]@{path=$set;object=$partObj}}
-  $children=@(SN-Get-NestedObject -obj $partObj -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec','PartInfo','PartParameterData'))
+  $children=@(SN-Get-NestedObject -obj $partObj -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec','PartInfo','PartParameterData','PartRecord','PartParams','ParametersData'))
   foreach($child in $children){
     $nested=SN-Try-SetField -obj $child.object -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
     if($nested){return [pscustomobject]@{path=($child.name+'.'+$nested);object=$child.object}}
-    foreach($grand in SN-Get-NestedObject -obj $child.object -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec','PartInfo','PartParameterData')){
+    foreach($grand in SN-Get-NestedObject -obj $child.object -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec','PartInfo','PartParameterData','PartRecord','PartParams','ParametersData')){
       $nested2=SN-Try-SetField -obj $grand.object -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
       if($nested2){return [pscustomobject]@{path=($child.name+'.'+$grand.name+'.'+$nested2);object=$grand.object}}
     }
   }
-  return $null
+  return (SN-Set-PartFieldDiscovered -partObj $partObj -aliases $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt)
 }
 function SN-Apply-WorkspacePartData($app,$requestParts){
   $updated=@()
