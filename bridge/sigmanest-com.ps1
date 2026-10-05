@@ -294,6 +294,10 @@ function Invoke-SigmaNestBuild($Request){
       $created += [pscustomobject]@{part=$(try{[string]$part.Name}catch{[string]$x.part});qty=$quantity;material=$(try{[string]$part.Material}catch{[string]$x.sigmaMaterial});thickness=$(try{[string]$part.Thickness}catch{[string]$x.thicknessMm});quantityProperty=$quantityProperty;materialProperty=$materialProperty;thicknessProperty=$thicknessProperty;sourcePath=$sourcePath;sourceType=$sourceType;sourceProperty=$sourceProperty;batchMultiplier=$x.batchMultiplier;taskBatches=@($x.taskBatches)}
     }
     $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
+    # Persist the geometry/tasks checkpoint before touching mutable Task Setup
+    # COM interfaces. If a later Task Setup call invalidates a COM proxy, the
+    # usable geometry workspace is still saved on disk.
+    $phase='SAVE_GEOMETRY_CHECKPOINT';$app.SaveWorkSpaceFile([string]$wsPath)
     $phase='APPLY_TASK_ATTRIBUTES';SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
     $phase='APPLY_TASK_QUANTITIES';SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
