@@ -542,6 +542,9 @@ function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[
 }
 
 function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
+  # Geometry-source rule: match by part/drawing name only. If any PRS matches
+  # at this stage, use the first PRS found. Only when no PRS exists, use the
+  # first DXF found. PRS never supplies material, thickness, or quantity.
   $n=Normalize -s $part
   $dxf=@()
   if($script:DXF_ROOT){$dxf=@(Get-DxfShardCandidates -root $script:DXF_ROOT -part $part)}
@@ -607,12 +610,9 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
       $minLen=[math]::Min($target.Length,$cn.Length)
       if($prefix -lt [math]::Ceiling($minLen*0.75)){continue}
       $score=$prefix*10 - [math]::Abs($target.Length-$cn.Length)*3
-      if([string]$candidate.fileType -eq 'PRS'){
-        $score+=20
-        Ensure-Metadata -item $candidate | Out-Null
-        if(Material-Equal -a $clMat -b ([string]$candidate.likelyMaterial) -aThickness $clThk -bThickness ([string]$candidate.thickness)){$score+=40}
-        if((Thickness-Number -s $clThk) -eq (Thickness-Number -s ([string]$candidate.thickness))){$score+=20}
-      }
+      # PRS is geometry-only. Never use PRS material/thickness to choose
+      # between fuzzy candidates. Prefer PRS over DXF only as a geometry source.
+      if([string]$candidate.fileType -eq 'PRS'){$score+=20}
       $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
     }
     $fuzzy=@($fuzzy|Sort-Object score -Descending)
