@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.9.3'
+$BRIDGE_VERSION = '2.9.4'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -981,6 +981,16 @@ function Handle-Request($req){
     ($request|ConvertTo-Json -Depth 20)|Set-Content -LiteralPath $reqFile -Encoding UTF8
     try{
       $worker=Join-Path $BridgeDir 'create-sigmanest-ws.ps1'
+      # Stage the creator script and request locally. This removes mapped-drive
+      # dependencies from PowerShell script startup and COM initialization.
+      $tempRoot=Join-Path ([IO.Path]::GetTempPath()) 'CL-WS-Creator'
+      $runDir=Join-Path $tempRoot ([Guid]::NewGuid().ToString('N'))
+      New-Item -ItemType Directory -Path $runDir -Force|Out-Null
+      $localWorker=Join-Path $runDir 'create-sigmanest-ws.ps1'
+      $localRequest=Join-Path $runDir 'request.json'
+      $localResult=Join-Path $runDir 'result.json'
+      Copy-Item -LiteralPath $worker -Destination $localWorker -Force
+      Copy-Item -LiteralPath $reqFile -Destination $localRequest -Force
       # Run the SigmaNEST creator as a real child process so its exit code,
       # stdout and stderr are preserved even when COM initialization crashes.
       $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
@@ -988,8 +998,8 @@ function Handle-Request($req){
       $creatorResult=Join-Path $BridgeDir ('_creator-result-'+[Guid]::NewGuid().ToString('N')+'.json')
       $psi=New-Object System.Diagnostics.ProcessStartInfo
       $psi.FileName=Get-PowerShellExe
-      $psi.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "'+$worker+'" -RequestFile "'+$reqFile+'" -ResultFile "'+$creatorResult+'"'
-      $psi.WorkingDirectory=$BridgeDir
+      $psi.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -STA -File "'+$localWorker+'" -RequestFile "'+$localRequest+'" -ResultFile "'+$localResult+'"'
+      $psi.WorkingDirectory=$runDir
       $psi.UseShellExecute=$false
       $psi.CreateNoWindow=$true
       $psi.RedirectStandardOutput=$true
@@ -1007,6 +1017,9 @@ function Handle-Request($req){
       $stderr=$stderrTask.GetAwaiter().GetResult()
       $exitCode=$proc.ExitCode
       $proc.Dispose()
+      if(Test-Path -LiteralPath $localResult){
+        try{Copy-Item -LiteralPath $localResult -Destination $creatorResult -Force}catch{}
+      }
       [string]$stdout|Set-Content -LiteralPath $creatorOut -Encoding UTF8
       [string]$stderr|Set-Content -LiteralPath $creatorErr -Encoding UTF8
       $rawText=([string]$stdout).Trim()
@@ -1026,6 +1039,9 @@ function Handle-Request($req){
               exitCode=$exitCode
               worker=$worker
               requestFile=$reqFile
+              localWorker=$localWorker
+              localRequest=$localRequest
+              localResult=$localResult
               stdout=$stdout
               stderr=$stderr
               message='SigmaNEST creator process exited without returning JSON.'
@@ -1093,7 +1109,10 @@ function Handle-Request($req){
           taskPlan=@($taskPlan)
         }
       }
-    }finally{Remove-Item -LiteralPath $reqFile -Force -ErrorAction SilentlyContinue}
+    }finally{
+      Remove-Item -LiteralPath $reqFile -Force -ErrorAction SilentlyContinue
+      if($runDir){Remove-Item -LiteralPath $runDir -Recurse -Force -ErrorAction SilentlyContinue}
+    }
   }
   [pscustomobject]@{Status=404;Data=@{error='Not found'}}
 }
