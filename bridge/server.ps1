@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.12.3'
+$BRIDGE_VERSION = '2.12.4'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -493,46 +493,15 @@ function Deduplicate-Candidates($candidates){
 }
 
 function Candidate-Score($candidate,[string]$clMat,[string]$clThk,[string]$matchType){
-  $score=switch($matchType){
+  # Geometry candidates are selected from the part-name match only.
+  # PRS metadata (material/thickness) is intentionally ignored. The PRS
+  # contributes geometry/path only; CL owns material, thickness and quantity.
+  return [int](switch($matchType){
     'EXACT' {300}
     'EMBEDDED' {200}
     'VARIATION' {100}
     default {0}
-  }
-
-  if([string]$candidate.fileType -eq 'PRS'){
-    Ensure-Metadata -item $candidate | Out-Null
-    $libMat=[string]$candidate.likelyMaterial
-    $libThk=[string]$candidate.thickness
-
-    $clMatKnown=-not [string]::IsNullOrWhiteSpace($clMat)
-    $clThkKnown=-not [string]::IsNullOrWhiteSpace($clThk)
-    $libMatKnown=-not [string]::IsNullOrWhiteSpace($libMat)
-    $libThkKnown=-not [string]::IsNullOrWhiteSpace($libThk)
-
-    if($clMatKnown -and $libMatKnown){
-      if(Material-Equal -a $clMat -b $libMat -aThickness $clThk -bThickness $libThk){$score+=80}
-      else{$score-=220}
-    }elseif($clMatKnown -and -not $libMatKnown){
-      $score+=5
-    }
-
-    if($clThkKnown -and $libThkKnown){
-      $ct=Thickness-Number -s $clThk
-      $lt=Thickness-Number -s $libThk
-      if(-not [double]::IsNaN($ct) -and -not [double]::IsNaN($lt)){
-        if($ct -eq $lt){$score+=60}else{$score-=160}
-      }
-    }elseif($clThkKnown -and -not $libThkKnown){
-      $score+=3
-    }
-  }else{
-    # DXFs are deliberately not guessed by material/thickness because their
-    # index currently contains path/name metadata only.
-    $score+=0
-  }
-
-  return [int]$score
+  })
 }
 
 function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[string]$matchType='EXACT') {
@@ -911,8 +880,9 @@ function Prepare-SigmaNestBuild($b){
       $selectionFuzzy=[bool]$(if($f.selectionFuzzy){$f.selectionFuzzy}else{$false})
 
       $sourceType=[string]$f.fileType
-      $libMat=[string]$f.likelyMaterial
-      $libThk=[string]$f.thickness
+      # PRS metadata is intentionally excluded from production decisions.
+      $libMat=''
+      $libThk=''
       $clMat=[string]$p.material
       $clThk=[string]$p.thickness
       $matKnown=!!$libMat.Trim()
@@ -1060,6 +1030,7 @@ function Prepare-SigmaNestBuild($b){
           sourcePath=$_.sourcePath
           sourceType=$_.sourceType
           prsPath=$(if($_.sourceType -eq 'PRS'){[string]$_.sourcePath}else{''})
+          geometryOnly=$([bool]($_.sourceType -eq 'PRS'))
           sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial) -thickness ([string]$_.thickness))
           thicknessMm=(Thickness-Number -s ([string]$_.thickness))
         }
