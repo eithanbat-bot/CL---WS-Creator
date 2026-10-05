@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile,[string]$ResultFile)
 $ErrorActionPreference='Stop'
-$CREATOR_VERSION='3.4.0'
+$CREATOR_VERSION='3.5.0'
 
 function Write-Diagnostic([string]$message,[string]$phase='STARTUP',[int]$exitCode=1){
   if(-not [string]::IsNullOrWhiteSpace($ResultFile)){
@@ -270,5 +270,5 @@ try{
     error=$_.Exception.Message
     category=$_.CategoryInfo.ToString()
   }|Out
-  exit 1
+  return
 }
