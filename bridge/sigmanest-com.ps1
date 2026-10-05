@@ -319,22 +319,51 @@ function Invoke-SigmaNestBuild($Request){
     if($afterParts -lt ($beforeParts+$queued.Count)){
       throw ('SigmaNEST committed '+($afterParts-$beforeParts)+' part(s) but '+$queued.Count+' part(s) were requested for import.')
     }
+
+    # Autosave the geometry workspace immediately after the imported parts are
+    # committed. This guarantees a usable .ws exists even if later Task Setup
+    # automation fails or disconnects a COM proxy.
+    $phase='SAVE_GEOMETRY_CHECKPOINT'
+    $saved=$false
+    $saveErrors=@()
+    for($attempt=1;$attempt -le 3 -and -not $saved;$attempt++){
+      try{
+        [void]$app.SaveWorkSpaceFile([string]$wsPath)
+        Start-Sleep -Milliseconds 350
+        $saved=Test-Path -LiteralPath $wsPath
+      }catch{
+        $saveErrors+=('Attempt '+$attempt+': '+(SN-ErrorText $_))
+        if($attempt -lt 3){Start-Sleep -Milliseconds 500}
+      }
+    }
+    if(-not $saved){
+      throw ('SigmaNEST imported '+($afterParts-$beforeParts)+' part(s), but the automatic .ws save did not produce a file: '+$wsPath+'. '+($saveErrors -join ' | '))
+    }
+
     $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
-    # Persist the geometry/tasks checkpoint before touching mutable Task Setup
-    # COM interfaces. If a later Task Setup call invalidates a COM proxy, the
-    # usable geometry workspace is still saved on disk.
-    $phase='SAVE_GEOMETRY_CHECKPOINT';$app.SaveWorkSpaceFile([string]$wsPath)
+    # Save again after the task list exists so the workspace remains resumable
+    # if a later task attribute or quantity update fails.
+    $phase='SAVE_TASK_CHECKPOINT'
+    $savedTask=$false
+    try{
+      [void]$app.SaveWorkSpaceFile([string]$wsPath)
+      Start-Sleep -Milliseconds 350
+      $savedTask=Test-Path -LiteralPath $wsPath
+    }catch{}
+    if(-not $savedTask){
+      throw ('SigmaNEST task list was created, but the automatic task checkpoint could not be confirmed on disk: '+$wsPath)
+    }
     $phase='APPLY_TASK_ATTRIBUTES';SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
     $phase='APPLY_TASK_QUANTITIES';SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.3';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
+    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-1.4';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
   }catch{
     $checkpointExists=$false
     try{$checkpointExists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
     return [pscustomobject]@{
       ok=$false
-      creatorVersion='DIRECT-COM-1.3'
+      creatorVersion='DIRECT-COM-1.4'
       phase=$phase
       error=$_.Exception.Message
       category=$_.CategoryInfo.ToString()
