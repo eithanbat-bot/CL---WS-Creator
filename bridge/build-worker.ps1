@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.12.0'
+$WorkerVersion='2.12.1'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
@@ -67,7 +67,7 @@ try{
   $finished=(Get-Date).ToUniversalTime()
   $state=if([bool]$data.ok){'COMPLETE'}else{'FAILED'}
   $message=if([bool]$data.ok){[string]$data.message}else{[string]$data.error}
-  $finalParts=if($data.parts){@($data.parts)}else{@($request.reportParts)}
+  $finalParts=if($mode -eq 'IMPORT_ONLY'){@($request.reportParts)}elseif($data.parts){@($data.parts)}else{@($request.reportParts)}
   $finalOutput=if($data.outputDir){[string]$data.outputDir}else{[string]$request.outputDir}
   $finalWs=[string]$data.wsPath
   $reviewCount=if($prepared){[int]$prepared.reviewCount}else{0}
