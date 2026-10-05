@@ -855,8 +855,6 @@ function Read-BuildStatus([string]$jobId){
 }
 
 function Prepare-SigmaNestBuild($b){
-
-    $b=$req.Body|ConvertFrom-Json
     $prsRoot=[IO.Path]::GetFullPath(([string]$(if($b.prsRoot){$b.prsRoot}else{$DEFAULT_LIBRARY})).Trim())
     $dxfRoot=[IO.Path]::GetFullPath(([string]$(if($b.dxfRoot){$b.dxfRoot}else{$DEFAULT_DXF_LIBRARY})).Trim())
     $dxfStatus=Get-DxfStatus
