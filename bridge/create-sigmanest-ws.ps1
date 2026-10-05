@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$RequestFile,[string]$ResultFile)
 $ErrorActionPreference='Stop'
-$CREATOR_VERSION='3.3.0'
+$CREATOR_VERSION='3.4.0'
 
 function Write-Diagnostic([string]$message,[string]$phase='STARTUP',[int]$exitCode=1){
   if(-not [string]::IsNullOrWhiteSpace($ResultFile)){
@@ -186,8 +186,16 @@ try{
   $wsPath=Join-Path -Path $wsDir -ChildPath ($safe+'.ws')
   if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
 
-  $phase='SIGMANEST_FILENEW'
-  $auto.FileNew()
+  $phase='SIGMANEST_WORKSPACE_INIT'
+  # SNApp creates an automation workspace when instantiated. Do not call
+  # SNAutomation.FileNew(): that method is not exposed by the verified X1.4
+  # SNAutomation interface and was a primary source of creator failures.
+  try{
+    $members=@($auto.GetType().GetMembers() | ForEach-Object { $_.Name })
+    if($members -contains 'FileNew'){ Invoke-ComMethod $auto 'FileNew' @() | Out-Null }
+  }catch{
+    # FileNew is optional. A newly-created SNApp is already a clean workspace.
+  }
   try{$app.PartsLibrary.Directory=[string]$req.libraryRoot}catch{}
 
   $created=@()
@@ -203,19 +211,22 @@ try{
 
     $part=Add-GeometryToWorkspace $app $sourcePath $sourceType
 
-    # Quantity is known from the SigmaNEST X1.4 part interface as BatchQty.
-    # Do not silently ignore a failed assignment: an incorrect WS is worse than
-    # stopping the build for review.
+    # BatchQty is the verified quantity field. Material is required for a new
+    # DXF and is also explicitly set for PRS parts so Auto Task can classify them.
     $quantity=[int][math]::Round([double]$x.qty)
+    if($quantity -lt 1){$quantity=1}
     $quantityProperty=Set-Required -obj $part -names @('BatchQty','QtyToNest','Quantity','Qty') -value $quantity -label 'quantity'
     $materialProperty=$null
-    if($x.sigmaMaterial){
+    if(-not [string]::IsNullOrWhiteSpace([string]$x.sigmaMaterial)){
       $materialProperty=Set-Required -obj $part -names @('Material') -value ([string]$x.sigmaMaterial) -label 'material'
     }
     $thicknessProperty=$null
     if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){
-      $thicknessProperty=Set-Required -obj $part -names @('Thickness','SheetThickness','Thk') -value ([double]$x.thicknessMm) -label 'thickness'
+      # Thickness is not guaranteed to be writable on every X1.4 Part COM
+      # object. Try the known names, but do not reject an otherwise valid PRS.
+      $thicknessProperty=Try-Set -obj $part -names @('Thickness','SheetThickness','Thk') -value ([double]$x.thicknessMm)
     }
+    $sourceProperty=Try-Set -obj $part -names @('SourceFilePath','SourcePath') -value ([string]$sourcePath)
     Safe-Set $part 'WONumber' $safe
     Safe-Set $part 'DrawingNumber' ([string]$x.part)
 
@@ -229,6 +240,7 @@ try{
       thicknessProperty=$thicknessProperty
       sourcePath=$sourcePath
       sourceType=$sourceType
+      sourceProperty=$sourceProperty
       batchMultiplier=$x.batchMultiplier
       taskBatches=@($x.taskBatches)
     }
