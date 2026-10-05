@@ -17,7 +17,7 @@
     <div>
       <div class="eyebrow">SIGMANEST AUTOMATION</div>
       <h1>CL - WS Creator</h1>
-      <p>Choose a cutting-list workbook, select the CL sheets to use, find geometry on the server, then build the SigmaNEST job. A Summary and Part Review worksheet are created in the active Excel workbook.</p>
+      <p>Import the CL geometry first. When ready, run AutoTask + Order Label to group tasks by material and thickness, apply the CL values, set the batch multiplier, and produce the release results.</p>
     </div>
     <div id="statusPill" class="pill neutral">Starting...</div>
   </header>
@@ -55,18 +55,27 @@
   </section>
 
   <section class="card">
-    <div class="sectionTitle">4. Build</div>
+    <div class="sectionTitle">4. Workspace</div>
     <label for="jobName">Job name</label>
     <input id="jobName" type="text" placeholder="J032-26">
-    <div class="row actionRow">
-      <button id="preview" class="secondary" type="button" disabled>Preview CL</button>
-      <button id="build" class="primary" type="button" disabled>Create SigmaNEST Job</button>
+    <label for="wsPath">Current SigmaNEST workspace (.ws)</label>
+    <input id="wsPath" type="text" placeholder="S:\SNDataX1\WS\J032-26.ws">
+    <div class="muted">Import Geometry creates this workspace. AutoTask uses this workspace without importing the geometry again.</div>
+  </section>
+
+  <section class="card actionCard">
+    <div class="sectionTitle">5. Actions</div>
+    <div class="actionGrid">
+      <button id="preview" class="secondary actionButton" type="button" disabled>Preview CL</button>
+      <button id="importGeometry" class="primary actionButton" type="button" disabled>Import Geometry Only</button>
+      <button id="autoTaskOrder" class="accent actionButton" type="button" disabled>AutoTask + Label Order</button>
     </div>
-    <div id="buildStatus" class="muted">Choose a CL workbook to begin.</div>
+    <div id="buildStatus" class="muted">Import Geometry first, then run AutoTask + Label Order.</div>
   </section>
 
   <section class="card">
-    <div class="sectionTitle">Results</div>
+    <div class="sectionTitle">Release Results</div>
+    <div class="summaryBanner"><strong id="releaseTitle">Ready</strong><span id="releaseDetail">No action has been run yet.</span></div>
     <div class="summaryGrid">
       <div><strong id="partsFound">0</strong><span>CL lines</span></div>
       <div><strong id="geometryFound">0</strong><span>Imported to WS</span></div>
@@ -81,7 +90,7 @@
     </div>
   </section>
 
-  <footer><span>Build 2.11.4 — background SigmaNEST build engine</span><span id="bridgeVersion">Local bridge: 127.0.0.1:17832</span></footer>
+  <footer><span>Build 2.12.0 — split geometry / AutoTask workflow</span><span id="bridgeVersion">Local bridge: 127.0.0.1:17832</span></footer>
 </main>
 
 <script src="src/clParser.js?v=__BUILD__"></script>
