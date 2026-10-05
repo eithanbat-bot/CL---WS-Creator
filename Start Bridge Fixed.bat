@@ -18,11 +18,17 @@ if exist "%TMP%" del /f /q "%TMP%" >nul 2>&1
 mkdir "%TMP%" >nul 2>&1
 
 echo [CL-WS] Downloading current self-updater...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $urls=@('%RAW%','https://github.com/eithanbat-bot/CL---WS-Creator/raw/refs/heads/main/bridge/update-and-start.ps1'); $ok=$false; $errors=@(); foreach($u in $urls){try{Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $u -OutFile '%TMP%\update-and-start.ps1' -Headers @{'User-Agent'='CL-WS-Creator-Bootstrap';'Cache-Control'='no-cache'}; if((Test-Path -LiteralPath '%TMP%\update-and-start.ps1') -and (Get-Item -LiteralPath '%TMP%\update-and-start.ps1').Length -gt 100){$ok=$true;break}}catch{$errors+=($u+': '+$_.Exception.Message)}}; if(-not $ok){throw ('Could not download the bridge updater without GitHub API access. '+($errors -join ' | '))}; $x=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile('%TMP%\update-and-start.ps1',[ref]$x,[ref]$e)|Out-Null;if($e.Count -gt 0){throw 'Downloaded bridge updater failed PowerShell syntax validation.'}"
-if errorlevel 1 goto FAIL
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $urls=@('%RAW%','https://github.com/eithanbat-bot/CL---WS-Creator/raw/refs/heads/main/bridge/update-and-start.ps1'); $ok=$false; $errors=@(); foreach($u in $urls){try{Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $u -OutFile '%TMP%\update-and-start.ps1' -Headers @{'User-Agent'='CL-WS-Creator-Bootstrap';'Cache-Control'='no-cache'}; if((Test-Path -LiteralPath '%TMP%\update-and-start.ps1') -and (Get-Item -LiteralPath '%TMP%\update-and-start.ps1').Length -gt 100){$ok=$true;break}}catch{$errors+=($u+': '+$_.Exception.Message)}}; if(-not $ok){Write-Warning ('Could not download the current updater: '+($errors -join ' | '))} else {$x=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile('%TMP%\update-and-start.ps1',[ref]$x,[ref]$e)|Out-Null;if($e.Count -gt 0){Remove-Item '%TMP%\update-and-start.ps1' -Force -ErrorAction SilentlyContinue;Write-Warning 'Downloaded bridge updater failed PowerShell syntax validation.'}}"
+ 
+set "UPDATER=%TMP%\update-and-start.ps1"
+if not exist "%UPDATER%" set "UPDATER=%ROOT%bridge\update-and-start.ps1"
+if not exist "%UPDATER%" (
+  echo [CL-WS] No usable bridge updater is available locally or from GitHub.
+  goto FAIL
+)
 
 echo [CL-WS] Starting verified self-updater...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%TMP%\update-and-start.ps1" -Root "%ROOT%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%UPDATER%" -Root "%ROOT%"
 set "RC=%ERRORLEVEL%"
 
 if not "%RC%"=="0" goto FAIL
