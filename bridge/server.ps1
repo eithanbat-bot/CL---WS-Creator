@@ -639,19 +639,28 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
         if(Material-Equal -a $clMat -b ([string]$candidate.likelyMaterial) -aThickness $clThk -bThickness ([string]$candidate.thickness)){$score+=40}
         if((Thickness-Number -s $clThk) -eq (Thickness-Number -s ([string]$candidate.thickness))){$score+=20}
       }
-      $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
+      $fuzzy += [pscustomobject]@{candidate=$candidate;score=[int]$score;prefix=[int]$prefix}
     }
-    $fuzzy=@($fuzzy|Sort-Object score -Descending)
+    $fuzzy=@($fuzzy|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[string]$_.candidate.file};Descending=$false})
     if($fuzzy.Count){
       $top=$fuzzy[0]
-      $second=if($fuzzy.Count -gt 1){$fuzzy[1]}else{$null}
-      if($null -eq $second -or ([int]$top.score-[int]$second.score) -ge 15){
-        $hit=$top.candidate
-        Set-Prop $hit 'selectionFuzzy' $true | Out-Null
-        Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
-        Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
-        return $hit
+      $alternatives=@($fuzzy|Select-Object -First 8|ForEach-Object{
+        [pscustomobject]@{file=[string]$_.candidate.file;score=[int]$_.score;fileType=[string]$_.candidate.fileType}
+      })
+      $hit=$top.candidate
+      Set-Prop $hit 'selectionDecision' 'BEST CANDIDATE' | Out-Null
+      Set-Prop $hit 'candidateScore' ([int]$top.score) | Out-Null
+      if($fuzzy.Count -gt 1){
+        Set-Prop $hit 'candidateAlternatives' $alternatives | Out-Null
+        $second=$fuzzy[1]
+        if(([int]$top.score-[int]$second.score) -lt 15){
+          Set-Prop $hit 'selectionFuzzy' $true | Out-Null
+          Set-Prop $hit 'ambiguousCount' ([int]$fuzzy.Count) | Out-Null
+        }
       }
+      Set-Prop $hit 'fuzzyPrefixLength' ([int]$top.prefix) | Out-Null
+      Set-Prop $hit 'matchType' 'FUZZY' | Out-Null
+      return $hit
     }
   }
   $null
