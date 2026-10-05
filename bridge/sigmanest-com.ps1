@@ -85,9 +85,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
     $targetName=[string]$rp.part
     $found=$null
     $workspaceIndex=-1
-    try{
-      if($null -ne $rp.workspaceIndex){$workspaceIndex=[int]$rp.workspaceIndex}
-    }catch{}
+    try{if($null -ne $rp.workspaceIndex){$workspaceIndex=[int]$rp.workspaceIndex}}catch{}
     if($workspaceIndex -ge 0){$found=SN-Get-WorkspacePartByIndex -app $app -index $workspaceIndex}
     if($null -eq $found){$found=SN-Find-WorkspacePart -app $app -targetName $targetName}
     if($null -eq $found){throw ('Could not find imported workspace part "'+$targetName+'" while applying CL data.')}
