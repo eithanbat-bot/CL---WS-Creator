@@ -67,12 +67,13 @@ function SN-Scalar-Int($value,$default=1){
     try{return [int]$default}catch{return 1}
   }
 }
-function SN-Get-WorkspacePartByIndex($app,[int]$index){
+function SN-Get-WorkspacePartByIndex($app,$index){
+  $index=SN-Scalar-Int -value $index -default -1;
   if($index -lt 0){return $null}
   try{
     $count=SN-Parts-Count $app
     if($index -ge $count){return $null}
-    $part=$app.PartsList.Items($index)
+    $part=SN-Invoke-ComMethod -obj $app.PartsList -name 'Items' -args @([int]$index)
     if($null -ne $part){return [pscustomobject]@{part=$part;index=$index}}
   }catch{}
   return $null
@@ -149,7 +150,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
     $targetName=[string]$rp.part
     $found=$null
     $workspaceIndex=-1
-    try{if($null -ne $rp.workspaceIndex){$workspaceIndex=[int]$rp.workspaceIndex}}catch{}
+    try{if($null -ne $rp.workspaceIndex){$workspaceIndex=SN-Scalar-Int -value $rp.workspaceIndex -default -1}}catch{}
     if($workspaceIndex -ge 0){$found=SN-Get-WorkspacePartByIndex -app $app -index $workspaceIndex}
     if($null -eq $found){$found=SN-Find-WorkspacePart -app $app -targetName $targetName}
     if($null -eq $found){throw ('Could not find imported workspace part "'+$targetName+'" while applying CL data.')}
@@ -188,7 +189,8 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
 
 function SN-Parts-Count($app){try{return [int]$app.PartsList.Count}catch{return 0}}
 
-function SN-Get-NewPart($app,[int]$beforeCount,[string]$label){
+function SN-Get-NewPart($app,$beforeCount,[string]$label){
+  $beforeCount=SN-Scalar-Int -value $beforeCount -default 0;
   $afterCount=SN-Parts-Count $app
   if($afterCount -le $beforeCount){throw ('SigmaNEST loaded "'+$label+'" but did not add it to the workspace PartsList.')}
   try{$last=$null;foreach($item in $app.PartsList){$last=$item};if($null -ne $last){return $last}}catch{}
@@ -639,7 +641,7 @@ function Invoke-SigmaNestBuild($Request){
       if([string]::IsNullOrWhiteSpace($sourcePath)){continue}
 
       $load=SN-Queue-Geometry -app $app -sourcePath $sourcePath -sourceType $sourceType
-      $quantity=[int][math]::Round([double]$x.qty);if($quantity -lt 1){$quantity=1}
+      $quantity=SN-Scalar-Int -value $x.qty -default 1;if($quantity -lt 1){$quantity=1}
       $material=[string]$x.sigmaMaterial
       $thicknessText=$(if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){[string]$x.thicknessMm}else{''})
       $queued += [pscustomobject]@{
