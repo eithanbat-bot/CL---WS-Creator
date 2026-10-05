@@ -954,6 +954,23 @@ function Handle-Request($req){
         try{$rawText=[string](Get-Content -LiteralPath $creatorResult -Raw -Encoding UTF8).Trim()}catch{}
       }
       if([string]::IsNullOrWhiteSpace($rawText)){
+        # Never leave an empty creator-result file. If the child process failed
+        # before its own script-level diagnostics could run, persist the parent
+        # process facts so the next failure is immediately actionable.
+        if(-not (Test-Path -LiteralPath $creatorResult) -or [string]::IsNullOrWhiteSpace([string](Get-Content -LiteralPath $creatorResult -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))){
+          try{
+            [ordered]@{
+              ok=$false
+              phase='CHILD_PROCESS'
+              exitCode=$exitCode
+              worker=$worker
+              requestFile=$reqFile
+              stdout=$stdout
+              stderr=$stderr
+              message='SigmaNEST creator process exited without returning JSON.'
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $creatorResult -Encoding UTF8
+          }catch{}
+        }
         $detail='SigmaNEST creator returned no result. Exit code: '+$exitCode+'.'
         if(-not [string]::IsNullOrWhiteSpace($errText)){$detail+=' STDERR: '+$errText}
         $diag=''
