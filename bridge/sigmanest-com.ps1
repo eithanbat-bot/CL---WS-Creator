@@ -61,8 +61,11 @@ function SN-Scalar-Number($value,[object]$default=1){
     return $d
   }catch{return $default}
 }
-function SN-Scalar-Int($value,[int]$default=1){
-  return [int][math]::Round((SN-Scalar-Number -value $value -default $default))
+function SN-Scalar-Int($value,$default=1){
+  $n=SN-Scalar-Number -value $value -default $default
+  try{return [int][math]::Round([double]$n)}catch{
+    try{return [int]$default}catch{return 1}
+  }
 }
 function SN-Get-WorkspacePartByIndex($app,[int]$index){
   if($index -lt 0){return $null}
@@ -88,6 +91,53 @@ function SN-Find-WorkspacePart($app,[string]$targetName){
   }
   return $null
 }
+function SN-Get-NestedObject($obj,[string[]]$names){
+  if($null -eq $obj){return @()}
+  $out=@()
+  foreach($name in $names){
+    try{
+      $v=$obj.$name
+      if($null -ne $v){$out+=[pscustomobject]@{name=$name;object=$v}}
+    }catch{}
+  }
+  @($out)
+}
+function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),[int]$expectedInt=-2147483648){
+  if($null -eq $obj){return $null}
+  foreach($name in $names){
+    try{
+      $obj.$name=$value
+      if($expectedText -ne ''){
+        if(([string]$obj.$name).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $name}
+      }elseif(-not [double]::IsNaN($expectedNumber)){
+        if(([double]$obj.$name) -eq $expectedNumber){return $name}
+      }elseif($expectedInt -ne -2147483648){
+        if(([int]$obj.$name) -eq $expectedInt){return $name}
+      }else{return $name}
+    }catch{}
+    try{
+      $obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::SetProperty,$null,$obj,@($value))|Out-Null
+      if($expectedText -ne ''){
+        $back=[string]$obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())
+        if($back.Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $name}
+      }elseif(-not [double]::IsNaN($expectedNumber)){
+        try{if(([double]$obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())) -eq $expectedNumber){return $name}}catch{}
+      }elseif($expectedInt -ne -2147483648){
+        try{if(([int]$obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())) -eq $expectedInt){return $name}}catch{}
+      }else{return $name}
+    }catch{}
+  }
+  return $null
+}
+function SN-Set-PartField($partObj,[string[]]$names,$value,[string]$expectedText='',[double]$expectedNumber=([double]::NaN),[int]$expectedInt=-2147483648){
+  $set=SN-Try-SetField -obj $partObj -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
+  if($set){return [pscustomobject]@{path=$set;object=$partObj}}
+  foreach($child in SN-Get-NestedObject -obj $partObj -names @('PNVar','PartData','PartParameters','PartParameter','Parameters','Param','PartRec')){
+    $nested=SN-Try-SetField -obj $child.object -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
+    if($nested){return [pscustomobject]@{path=($child.name+'.'+$nested);object=$child.object}}
+  }
+  return $null
+}
 function SN-Apply-WorkspacePartData($app,$requestParts){
   $updated=@()
   foreach($rp in @($requestParts)){
@@ -106,50 +156,26 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
     $row=[ordered]@{part=$targetName;index=[int]$found.index;qty=$qty;material=$material;thickness=$thickness;quantityProperty='';materialProperty='';thicknessProperty='';warnings=@()}
 
     if(-not [string]::IsNullOrWhiteSpace($material)){
-      $set=$false
-      foreach($propertyName in @('Material','MaterialName','Mat')){
-        try{
-          $partObj.$propertyName=$material
-          $back=[string]$partObj.$propertyName
-          if($back.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
-            $row.materialProperty=$propertyName;$set=$true;break
-          }
-        }catch{
-          if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating material for "'+$targetName+'" (0x80010108).')}
-        }
+      $setInfo=$null
+      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Material','MaterialName','Mat') -value $material -expectedText $material}catch{
+        if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating material for "'+$targetName+'" (0x80010108).')}
       }
-      if(-not $set){throw ('CL material "'+$material+'" could not be written/read back on imported workspace part "'+$targetName+'"')}
+      if(-not $setInfo){throw ('CL material "'+$material+'" could not be written/read back on imported workspace part "'+$targetName+'".')}
     }
 
     if(-not [double]::IsNaN($thickness)){
-      $set=$false
-      foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
-        try{
-          $partObj.$propertyName=$thickness
-          $back=SN-Scalar-Number -value $partObj.$propertyName -default ([double]::NaN)
-          if($back -eq $thickness){
-            $row.thicknessProperty=$propertyName;$set=$true;break
-          }
-        }catch{
-          if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating thickness for "'+$targetName+'" (0x80010108).')}
-        }
+      $setInfo=$null
+      try{$setInfo=SN-Set-PartField -partObj $partObj -names @('Thickness','SheetThickness','Thk','MaterialThickness') -value $thickness -expectedNumber $thickness}catch{
+        if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating thickness for "'+$targetName+'" (0x80010108).')}
       }
-      if(-not $set){throw ('CL thickness '+$thickness+'mm could not be written/read back on imported workspace part "'+$targetName+'"')}
+      if(-not $setInfo){throw ('CL thickness '+$thickness+'mm could not be written/read back on imported workspace part "'+$targetName+'".')}
     }
 
-    $set=$false
-    foreach($propertyName in @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq')){
-      try{
-        $partObj.$propertyName=$qty
-        $back=SN-Scalar-Int -value $partObj.$propertyName -default -1
-        if($back -eq $qty){
-          $row.quantityProperty=$propertyName;$set=$true;break
-        }
-      }catch{
-        if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating quantity for "'+$targetName+'" (0x80010108).')}
-      }
+    $setInfo=$null
+    try{$setInfo=SN-Set-PartField -partObj $partObj -names @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered') -value $qty -expectedInt $qty}catch{
+      if(SN-IsDisconnected $_){throw ('SigmaNEST COM disconnected while updating quantity for "'+$targetName+'" (0x80010108).')}
     }
-    if(-not $set){throw ('CL quantity '+$qty+' could not be written/read back on imported workspace part "'+$targetName+'"')}
+    if(-not $setInfo){throw ('CL quantity '+$qty+' could not be written/read back on imported workspace part "'+$targetName+'".')}
     $updated += [pscustomobject]$row
   }
   @($updated)
@@ -558,7 +584,7 @@ function Invoke-SigmaNestAutoTask($Request){
     $phase='LOAD_WORKSPACE'
     $app.LoadWorkSpaceFile([string]$wsPath)
     $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts
+    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued
     $phase='AUTO_TASK'
     $app.AutoTask()
     Start-Sleep -Milliseconds 500
