@@ -13,7 +13,6 @@ try{[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls1
 
 $Repo='eithanbat-bot/CL---WS-Creator'
 $Branch='main'
-$RawBase="https://raw.githubusercontent.com/$Repo/$Branch/"
 $Port=17832
 
 function Say([string]$Message,[string]$Color='Gray'){Write-Host "[CL-WS] $Message" -ForegroundColor $Color}
@@ -150,9 +149,9 @@ try{
   $localManifest=Join-Path $Root 'manifest.xml'
   $manifestInstall=$false
   if(Test-Path -LiteralPath $localManifest){
-    $remoteManifest=Join-Path $tmpRoot 'manifest.xml'
-    Say 'Checking local manifest.xml...'
-    Invoke-WebRequest -Uri ($RawBase+'manifest.xml') -OutFile $remoteManifest -UseBasicParsing -TimeoutSec 120 -Headers @{'User-Agent'='CL-WS-Creator-Updater';'Cache-Control'='no-cache'}
+    $remoteManifest=Join-Path $archiveRoot[0].FullName 'manifest.xml'
+    Say 'Checking local manifest.xml from the downloaded archive...'
+    if(-not(Test-Path -LiteralPath $remoteManifest)){throw 'GitHub archive does not contain manifest.xml.'}
     $buildId=($remoteVersion -replace '[^A-Za-z0-9]','')
     $manifestText=Get-Content -LiteralPath $remoteManifest -Raw -Encoding UTF8
     if($manifestText.Contains('__BUILD__')){
