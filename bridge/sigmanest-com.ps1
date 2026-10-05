@@ -485,7 +485,7 @@ function Invoke-SigmaNestImportGeometry($Request){
     $after=SN-Parts-Count $app
     if($after -lt ($before+$queued.Count)){throw ('SigmaNEST committed '+($after-$before)+' part(s) but '+$queued.Count+' were requested.')}
     $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued
+    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts
     $phase='SAVE_GEOMETRY'
     $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'geometry'
     return [pscustomobject]@{
