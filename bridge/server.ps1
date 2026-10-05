@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.11.4'
+$BRIDGE_VERSION = '2.12.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -811,7 +811,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.11.4'
+    workerVersion='2.12.0'
     pid=$null
     started=$started.ToString('o')
     finished=$null
@@ -1113,6 +1113,7 @@ function Handle-Request($req){
     $workerRequest=[pscustomobject]@{
       jobId=''
       statusFile=''
+      mode='FULL'
       jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
       outputDir=''
       selectedSheets=@($b.selectedSheetNames)
@@ -1120,19 +1121,60 @@ function Handle-Request($req){
       buildRequest=$b
     }
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-    return [pscustomobject]@{
-      Status=202
-      Data=@{
-        accepted=$true
-        state='RUNNING'
-        jobId=$workerInfo.jobId
-        pid=$workerInfo.pid
-        started=$workerInfo.started
-        outputDir=''
-        message='SigmaNEST job accepted. Matching, geometry staging and SigmaNEST creation are running in the background.'
+    return [pscustomobject]@{Status=202;Data=@{
+      accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started
+      outputDir='';message='Full SigmaNEST build accepted in the background.'
+    }}
+  }
+
+  if($req.Path -eq '/api/import-geometry' -and $req.Method -eq 'POST'){
+    $b=$req.Body|ConvertFrom-Json
+    if($null -eq $b){throw 'Import request body is required.'}
+    $workerRequest=[pscustomobject]@{
+      jobId=''
+      statusFile=''
+      mode='IMPORT_ONLY'
+      jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
+      outputDir=''
+      selectedSheets=@($b.selectedSheetNames)
+      reportParts=@($b.parts)
+      buildRequest=$b
+    }
+    $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
+    return [pscustomobject]@{Status=202;Data=@{
+      accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started
+      outputDir='';message='Geometry import accepted. SigmaNEST tasks will not be created by this action.'
+    }}
+  }
+
+  if($req.Path -eq '/api/autotask-label' -and $req.Method -eq 'POST'){
+    $b=$req.Body|ConvertFrom-Json
+    if($null -eq $b){throw 'AutoTask request body is required.'}
+    $ws=[string]$b.wsPath
+    if([string]::IsNullOrWhiteSpace($ws)){throw 'A SigmaNEST workspace path is required before AutoTask.'}
+    $workerRequest=[pscustomobject]@{
+      jobId=''
+      statusFile=''
+      mode='AUTOTASK_ONLY'
+      jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
+      outputDir=(Split-Path -Parent $ws)
+      selectedSheets=@($b.selectedSheetNames)
+      reportParts=@($b.parts)
+      autoTaskRequest=[pscustomobject]@{
+        wsPath=$ws
+        jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
+        parts=@($b.parts)
+        libraryRoot=[string]$b.prsRoot
       }
     }
+    $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
+    return [pscustomobject]@{Status=202;Data=@{
+      accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started
+      outputDir=(Split-Path -Parent $ws);wsPath=$ws
+      message='AutoTask/order-label operation accepted in the background.'
+    }}
   }
+
   if($req.Path -match '^/api/build-status/([0-9a-fA-F-]{36})$' -and $req.Method -eq 'GET'){
     $jobId=$Matches[1]
     $status=Read-BuildStatus -jobId $jobId
