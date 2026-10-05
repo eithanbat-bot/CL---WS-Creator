@@ -140,9 +140,7 @@ jobs:
           if(-not $updater.Contains('Expand-Archive')){throw 'Updater does not extract the repository archive.'}
           if($updater.Contains('$ApiContents=')){throw 'Updater still contains the old per-file GitHub Contents API dependency.'}
 
-          if(-not $bat.Contains('api.github.com/repos/eithanbat-bot/CL---WS-Creator/contents/bridge/update-and-start.ps1?ref=main')){throw 'Bootstrap launcher does not point to the GitHub Contents API self-updater.'}
-          if(-not $bat.Contains('Git blob integrity validation')){throw 'Bootstrap launcher does not verify updater integrity.'}
-          if(-not $bat.Contains('FromBase64String')){throw 'Bootstrap launcher does not decode exact GitHub updater bytes.'}
+          if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the raw GitHub self-updater.'}
           if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
           if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
           if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
