@@ -43,4 +43,11 @@ th{position:sticky;top:0;background:#f8fafc;font-weight:700}
 .warnText{color:#a16207;font-weight:700}
 .badText{color:#b91c1c;font-weight:700}
 footer{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:#94a3b8;padding:12px 2px 4px}
-@media(max-width:650px){.summaryGrid{grid-template-columns:1fr 1fr}.hero{flex-direction:column}footer{flex-direction:column}}
+@media(max-width:650px){.summaryGrid{grid-template-columns:1fr 1fr}.actionGrid{grid-template-columns:1fr}.hero{flex-direction:column}footer{flex-direction:column}}
+
+.actionGrid{display:grid;grid-template-columns:1fr 1.5fr 1.5fr;gap:8px}
+.actionButton{min-height:44px}
+.accent{background:#166534;color:#fff}
+.summaryBanner{margin-bottom:10px;padding:11px 12px;border-radius:8px;background:#eef6ff;border:1px solid #d8e8f7}
+.summaryBanner strong{display:block;font-size:14px;color:#12324a}
+.summaryBanner span{display:block;font-size:11px;color:#64748b;margin-top:3px}
