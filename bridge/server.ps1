@@ -2,7 +2,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.9.4'
+$BRIDGE_VERSION = '2.9.5'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -991,6 +991,30 @@ function Handle-Request($req){
       $localResult=Join-Path $runDir 'result.json'
       Copy-Item -LiteralPath $worker -Destination $localWorker -Force
       Copy-Item -LiteralPath $reqFile -Destination $localRequest -Force
+
+      # Parse the exact staged creator before starting a child PowerShell.
+      # This turns a silent exit code 1 into an actionable parser diagnostic.
+      $parseTokens=$null
+      $parseErrors=$null
+      [System.Management.Automation.Language.Parser]::ParseFile(
+        $localWorker,[ref]$parseTokens,[ref]$parseErrors
+      )|Out-Null
+      if($parseErrors -and $parseErrors.Count -gt 0){
+        $parseText=($parseErrors|ForEach-Object{
+          'Line '+$_.Extent.StartLineNumber+': '+$_.Message
+        }) -join ' | '
+        [ordered]@{
+          ok=$false
+          phase='CREATOR_PARSE'
+          exitCode=2
+          worker=$worker
+          localWorker=$localWorker
+          parseErrors=@($parseText)
+          message='The staged SigmaNEST creator has PowerShell parser errors.'
+        }|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $creatorResult -Encoding UTF8
+        throw ('SigmaNEST creator parser check failed: '+$parseText)
+      }
+
       # Run the SigmaNEST creator as a real child process so its exit code,
       # stdout and stderr are preserved even when COM initialization crashes.
       $creatorOut=Join-Path $BridgeDir ('_creator-out-'+[Guid]::NewGuid().ToString('N')+'.txt')
