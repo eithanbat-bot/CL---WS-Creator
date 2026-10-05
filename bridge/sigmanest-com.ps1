@@ -374,6 +374,50 @@ function SN-Apply-WorkspacePartData($app,$requestParts){
   }
   @($updated)
 }
+function SN-Read-PartField($partObj,[string[]]$aliases,[string]$expectedText='',$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
+  if($null -eq $partObj){return $null}
+  foreach($prop in @(SN-ComPropertyNames $partObj)){
+    if(-not (SN-FieldNameMatches -name $prop -aliases $aliases)){continue}
+    try{
+      $v=$partObj.$prop
+      if($expectedText -ne ''){
+        if(([string]$v).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return [pscustomobject]@{path=$prop;value=[string]$v}}
+      }elseif(-not [double]::IsNaN($expectedNumber)){
+        $n=SN-Scalar-Number -value $v -default ([double]::NaN)
+        if(-not [double]::IsNaN([double]$n) -and [double]$n -eq $expectedNumber){return [pscustomobject]@{path=$prop;value=$n}}
+      }elseif($expectedInt -ne -2147483648){
+        $n=SN-Scalar-Int -value $v -default -2147483648
+        if($n -eq $expectedInt){return [pscustomobject]@{path=$prop;value=$n}}
+      }else{
+        return [pscustomobject]@{path=$prop;value=$v}
+      }
+    }catch{}
+  }
+  return $null
+}
+function SN-Verify-WorkspaceCLData($app,$requestParts){
+  foreach($rp in @($requestParts)){
+    $target=[string]$rp.part
+    $source=[string]$rp.sourcePath
+    $found=SN-Find-WorkspacePartExact -app $app -targetName $target -sourcePath $source -usedIndices @()
+    if($null -eq $found){throw ('Post-save verification could not find SigmaNEST part "'+$target+'".')}
+    $material=[string]$rp.sigmaMaterial
+    if(-not [string]::IsNullOrWhiteSpace($material)){
+      $m=SN-Read-PartField -partObj $found.part -aliases @('Material','MaterialName','Mat','MatName','MaterialType') -expectedText $material
+      if($null -eq $m){throw ('Post-save verification failed for "'+$target+'": material is not "'+$material+'".')}
+    }
+    $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
+    if(-not [double]::IsNaN($thickness)){
+      $t=SN-Read-PartField -partObj $found.part -aliases @('Thickness','SheetThickness','Thk','MaterialThickness','Thick') -expectedNumber $thickness
+      if($null -eq $t){throw ('Post-save verification failed for "'+$target+'": thickness is not '+$thickness+'mm.')}
+    }
+    $qty=SN-Scalar-Int -value $rp.qty -default 1
+    if($qty -lt 1){$qty=1}
+    $q=SN-Read-PartField -partObj $found.part -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
+    if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
+  }
+  return $true
+}
 function SN-Parts-Count($app){try{return [int]$app.PartsList.Count}catch{return 0}}
 
 function SN-Get-NewPart($app,$beforeCount,[string]$label){
@@ -662,7 +706,7 @@ function Invoke-SigmaNestImportGeometry($Request){
       }
       $queued += [pscustomobject]@{
         part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial
-        thicknessMm=$x.thicknessMm;workspaceIndex=$workspaceIndex
+        thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=[string]$x.sourceType
       }
       $queuedIndex++
     }
@@ -675,6 +719,9 @@ function Invoke-SigmaNestImportGeometry($Request){
     $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts
     $phase='SAVE_GEOMETRY'
     $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'geometry'
+    $phase='VERIFY_SAVED_CL_DATA'
+    $app.LoadWorkSpaceFile([string]$wsPath)
+    $verify=SN-Verify-WorkspaceCLData -app $app -requestParts $queued
     return [pscustomobject]@{
       ok=$true;phase='IMPORT_COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count
       partUpdates=@($partUpdates);tasksCreated=0;message=('Geometry imported and saved to '+$wsPath)
