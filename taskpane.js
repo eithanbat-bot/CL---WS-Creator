@@ -110,8 +110,8 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
     ['Batch values applied',tasks.filter(function(x){return x.batchApplied}).length,'Task labels applied',tasks.filter(function(x){return x.labelApplied}).length],
     ['','','',''],
     ['HAND-OFF','DETAIL','',''],
-    ['Geometry source','PRS preferred; recursive DXF index used when PRS is unavailable.','',''],
-    ['CL overrides','Material, thickness and quantity are applied to the imported workspace part; the master PRS file is not overwritten.','',''],
+    ['Geometry source','DXF preferred in the current test build; PRS is fallback.','',''],
+    ['CL overrides','Material, thickness and quantity are written to the SigmaNEST PartsList and TasksList, then verified after save.','',''],
     ['Workspace',result.wsPath||currentWsPath||'Not available','',''],
     ['Warnings',warnings.join(' | '),'','']
   ];
