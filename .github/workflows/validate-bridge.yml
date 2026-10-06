@@ -16,6 +16,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $files = @(
             'bridge/server.ps1',
+            'bridge/sigmanest-com.ps1',
+            'bridge/build-worker.ps1',
             'bridge/create-sigmanest-ws.ps1',
             'bridge/dxf-indexer.ps1',
             'bridge/update-and-start.ps1',
@@ -100,6 +102,7 @@ jobs:
           $tracked = @(git ls-files)
 
           if($tracked -notcontains 'bridge/create-sigmanest-ws.ps1'){throw 'Repository tree is missing bridge/create-sigmanest-ws.ps1.'}
+          $com = Get-Content -Raw -LiteralPath 'bridge/sigmanest-com.ps1'
           if($tracked -contains 'create-sigmanest-ws.ps1' -or $tracked -contains 'server.ps1' -or $tracked -contains 'dxf-indexer.ps1' -or $tracked -contains 'update-and-start.ps1'){
             throw 'Repository tree contains a stray root-level bridge runtime file.'
           }
@@ -111,6 +114,8 @@ jobs:
           if(-not $server.Contains('AcceptTcpClientAsync')){throw 'Bridge listener is not scheduler-friendly.'}
           if(-not $server.Contains('/api/dxf-refresh')){throw 'DXF refresh API endpoint is missing.'}
           if($server.Contains('Get-GeometryFiles -root $dxfRoot')){throw 'Server must not use the synchronous DXF walk.'}
+          if(-not $server.Contains('deliberately prefer DXF')){throw 'Server does not contain the DXF-first geometry selection rule.'}
+          if(-not $server.Contains('$pool=if($dxf.Count -gt 0){$dxf}')){throw 'Server does not prefer DXF when a DXF candidate exists.'}
           if(-not $server.Contains('DXF_INDEX_NOT_READY')){throw 'Server build API does not reject incomplete DXF indexes.'}
           if(-not $server.Contains('FOUND - DXF')){throw 'Server does not have the DXF-ready status path.'}
           if(-not $server.Contains('If any PRS matches at this stage, use the first PRS found.')){throw 'Server does not enforce PRS-first geometry selection.'}
@@ -142,10 +147,13 @@ jobs:
 
           if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the raw GitHub self-updater.'}
           if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
+          if(-not $com.Contains('function SN-Verify-WorkspaceTaskData')){throw 'SigmaNEST COM runtime does not verify task-level CL data.'}
+          if(-not $com.Contains("$phase='CREATE_TASKS'")){throw 'SigmaNEST COM import path does not create task records.'}
+          if(-not $com.Contains("'BatchQty','BatchQuantity'")){throw 'SigmaNEST COM runtime does not prioritize BatchQty for quantity.'}
           if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
           if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
           if(-not $html.Contains('id="refreshDxf"')){throw 'Task pane HTML is missing the DXF refresh button.'}
           if(-not (Get-Content -Raw -LiteralPath 'bridge/create-sigmanest-ws.ps1').Contains('$RequestFile,[string]$ResultFile')){throw 'SigmaNEST creator parameters are missing.'}
 
-          if($bridgeVersion -ne '2.12.4'){throw "Unexpected bridge runtime version: $bridgeVersion"}
+          if($bridgeVersion -ne '2.13.2'){throw "Unexpected bridge runtime version: $bridgeVersion"}
           Write-Host ("Architecture checks: OK. Bridge "+$bridgeVersion+" / DXF indexer "+$indexerVersion) -ForegroundColor Green
