@@ -1378,6 +1378,11 @@ function Invoke-SigmaNestBuild($Request){
     # Autosave the geometry workspace immediately after the imported parts are
     # committed. This guarantees a usable .ws exists even if later Task Setup
     # automation fails or disconnects a COM proxy.
+    # Apply CL production data before the first workspace checkpoint. A saved
+    # checkpoint must never be the first artifact containing only PRS metadata.
+    $phase='APPLY_CL_PART_DATA'
+    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $safe -linkFile ([string]$Request.clLinkFile)
+
     $phase='SAVE_GEOMETRY_CHECKPOINT'
     $saved=$false
     $saveErrors=@()
@@ -1392,10 +1397,9 @@ function Invoke-SigmaNestBuild($Request){
       }
     }
     if(-not $saved){
-      throw ('SigmaNEST imported '+($afterParts-$beforeParts)+' part(s), but the automatic .ws save did not produce a file: '+$wsPath+'. '+($saveErrors -join ' | '))
+      throw ('SigmaNEST imported '+($afterParts-$beforeParts)+' part(s), CL data was applied, but the automatic .ws save did not produce a file: '+$wsPath+'. '+($saveErrors -join ' | '))
     }
 
-    $phase='APPLY_CL_PART_DATA';$partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $safe -linkFile ([string]$Request.clLinkFile)
     $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
     # Save again after the task list exists so the workspace remains resumable
     # if a later task attribute or quantity update fails.
