@@ -1,0 +1,30 @@
+name: PowerShell syntax check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "fix/**"
+
+jobs:
+  powershell-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $errorsFound = $false
+          Get-ChildItem -Path . -Filter *.ps1 -Recurse | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors -and $errors.Count -gt 0) {
+              $errorsFound = $true
+              Write-Host "::error file=$($_.FullName)::$($errors -join ' | ')"
+            } else {
+              Write-Host "OK: $($_.FullName)"
+            }
+          }
+          if ($errorsFound) { exit 1 }
