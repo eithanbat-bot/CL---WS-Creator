@@ -376,7 +376,6 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',$link
       thickness=$thickness
       sourcePath=$sourcePath
       sourceType=[string]$rp.sourceType
-      sourceType=[string]$rp.sourceType
       quantityProperty=''
       materialProperty=''
       thicknessProperty=''
@@ -1130,6 +1129,50 @@ function Invoke-SigmaNestImportGeometry($Request){
   }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
 }
 
+function SN-Verify-TaskCLData($app,$requestParts){
+  $taskCount=0
+  try{$taskCount=[int]$app.TasksList.Count}catch{}
+  if($taskCount -le 0){throw 'No SigmaNEST tasks are available for CL-data verification.'}
+
+  foreach($rp in @($requestParts)){
+    $foundTaskPart=$null
+    for($ti=0;$ti -lt $taskCount -and $null -eq $foundTaskPart;$ti++){
+      $task=$null
+      try{$task=$app.TasksList.Items($ti)}catch{continue}
+      if($null -eq $task){continue}
+      $pc=0;try{$pc=[int]$task.PartsList.Count}catch{}
+      for($pi=0;$pi -lt $pc;$pi++){
+        $tp=$null;try{$tp=$task.PartsList.Items($pi)}catch{continue}
+        if($null -ne $tp -and (SN-TaskPart-MatchesRequest -taskPart $tp -rp $rp)){
+          $foundTaskPart=$tp
+          break
+        }
+      }
+    }
+    if($null -eq $foundTaskPart){
+      throw ('Post-save task verification could not map CL part "'+[string]$rp.part+'".')
+    }
+
+    $material=[string]$rp.sigmaMaterial
+    if(-not [string]::IsNullOrWhiteSpace($material)){
+      $m=SN-Read-PartField -partObj $foundTaskPart -aliases @('Material','MaterialName','PartMaterial','MaterialDescription','MaterialType','Mat','MatName','SheetMaterial','StockMaterial','NestMaterial') -expectedText $material
+      if($null -eq $m){throw ('Post-save task verification failed for "'+[string]$rp.part+'": material is not "'+$material+'".')}
+    }
+
+    $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
+    if(-not [double]::IsNaN($thickness)){
+      $t=SN-Read-PartField -partObj $foundTaskPart -aliases @('Thickness','SheetThickness','MaterialThickness','ThicknessValue','PartThickness','Thk','Thick') -expectedNumber $thickness
+      if($null -eq $t){throw ('Post-save task verification failed for "'+[string]$rp.part+'": thickness is not '+$thickness+'mm.')}
+    }
+
+    $qty=SN-Scalar-Int -value $rp.qty -default 1
+    if($qty -lt 1){$qty=1}
+    $q=SN-Read-PartField -partObj $foundTaskPart -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','BatchQty','BatchQuantity','QtyToNest','QuantityToNest','NestQuantity') -expectedInt $qty
+    if($null -eq $q){throw ('Post-save task verification failed for "'+[string]$rp.part+'": quantity is not '+$qty+'.')}
+  }
+  return $true
+}
+
 function SN-Set-TaskNameAndBatch($app,$requestParts){
   $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
   $map=@{};foreach($rp in @($requestParts)){$map[[string]$rp.part]=$rp}
@@ -1224,14 +1267,19 @@ function Invoke-SigmaNestAutoTask($Request){
     $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
     if($taskCount -le 0){throw 'SigmaNEST AutoTask completed but created no tasks.'}
     $phase='APPLY_TASK_CL_DATA'
-    $taskMaterialWarnings=@()
-    try{SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts}catch{$taskMaterialWarnings+=($_.Exception.Message)}
-    try{SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts}catch{$taskMaterialWarnings+=($_.Exception.Message)}
+    SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
+    SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='LABEL_AND_BATCH'
     $taskData=SN-Set-TaskNameAndBatch -app $app -requestParts $Request.parts
     $allWarnings=@($taskMaterialWarnings)+@($taskData.warnings)
     $phase='SAVE'
     $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
+    $phase='SAVE'
+    $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
+    $app.LoadWorkSpaceFile([string]$wsPath)
+    SN-Verify-WorkspaceCLData -app $app -requestParts $Request.parts | Out-Null
+    SN-Verify-TaskCLData -app $app -requestParts $Request.parts | Out-Null
+    $allWarnings=@($taskData.warnings)
     $ok=($allWarnings.Count -eq 0)
     return [pscustomobject]@{
       ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
