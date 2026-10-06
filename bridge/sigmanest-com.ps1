@@ -363,7 +363,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
     }
 
     if(-not [string]::IsNullOrWhiteSpace($material)){
-      $setInfo=SN-Set-PartField -partObj $partObj -names @('Material','MaterialName','PartMaterial','MaterialDescription','MaterialType','Mat','MatName','SheetMaterial','StockMaterial','NestMaterial') -value $material -expectedText $material
+      $setInfo=SN-Set-PartField -partObj $partObj -names @('Material','MaterialName','PartMaterial','MaterialDescription','MaterialType','Mat','MatName') -value $material -expectedText $material
       if(-not $setInfo){
         throw ('CL material "'+$material+'" could not be written and verified on SigmaNEST part "'+$targetName+'".')
       }
@@ -490,7 +490,7 @@ function SN-Verify-WorkspaceCLData($app,$requestParts){
     }
     $qty=SN-Scalar-Int -value $rp.qty -default 1
     if($qty -lt 1){$qty=1}
-    $q=SN-Read-PartField -partObj $found.part -aliases @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
+    $q=SN-Read-PartField -partObj $found.part -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
     if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
   }
   return $true
@@ -781,1005 +781,6 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=
   throw ('SigmaNEST could not load "'+$label+'" as geometry. '+($errors -join ' | '))
 }
 
-function SN-Normalize-TaskPartName([string]$value){
-  if($null -eq $value){return ''}
-  $s=$value.ToUpperInvariant()
-  $s=$s -replace '\.[Pp][Rr][Ss]
-  $taskCount=0
-  try{$taskCount=[int]$app.TasksList.Count}catch{}
-  if($taskCount -le 0){
-    throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL material/thickness safely.'
-  }
-
-  foreach($rp in @($requestParts)){
-    $targetName=[string]$rp.part
-    $material=[string]$rp.sigmaMaterial
-    $thickness=$null
-    try{
-      if($rp.thicknessMm -ne $null -and -not [double]::IsNaN([double]$rp.thicknessMm)){
-        $thickness=[double]$rp.thicknessMm
-      }
-    }catch{}
-
-    $matched=$false
-    $matchedTaskIndex=-1
-    $matchedPartIndex=-1
-
-    for($ti=0;$ti -lt $taskCount -and -not $matched;$ti++){
-      $task=$null
-      try{$task=$app.TasksList.Items($ti)}catch{continue}
-      if($null -eq $task){continue}
-
-      $taskPartCount=0
-      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
-      if($taskPartCount -le 0){continue}
-
-      for($pi=0;$pi -lt $taskPartCount;$pi++){
-        $taskPart=$null
-        try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
-        if($null -eq $taskPart){continue}
-        $taskPartName=''
-        try{$taskPartName=[string]$taskPart.Name}catch{}
-        if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not (SN-TaskPartNameMatches $taskPartName $targetName)){continue}
-
-        $matched=$true
-        $matchedTaskIndex=$ti
-        $matchedPartIndex=$pi
-        break
-      }
-    }
-
-    if(-not $matched){
-      throw ('Could not find CL part "'+$targetName+'" inside any SigmaNEST task after task creation.')
-    }
-
-    # Reacquire the COM task/part immediately before each mutation. SigmaNEST
-    # may rebuild the task tree when Task Setup data changes, invalidating
-    # previously returned COM interfaces.
-    if(-not [string]::IsNullOrWhiteSpace($material)){
-      $task=$null;$taskPart=$null
-      try{$task=$app.TasksList.Items($matchedTaskIndex)}catch{}
-      if($null -eq $task){throw ('Could not reacquire SigmaNEST task index '+$matchedTaskIndex+' for part "'+$targetName+'".')}
-      try{$taskPart=$task.PartsList.Items($matchedPartIndex)}catch{}
-      if($null -eq $taskPart){throw ('Could not reacquire SigmaNEST task-part index '+$matchedPartIndex+' for part "'+$targetName+'".')}
-
-      $setMaterial=$false
-      foreach($propertyName in @('Material','MaterialName','Mat')){
-        try{
-          $taskPart.$propertyName=$material
-          $readBack=[string]$taskPart.$propertyName
-          if($readBack.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
-            $setMaterial=$true
-            break
-          }
-        }catch{
-          if(SN-IsDisconnected $_){
-            throw ('SigmaNEST COM task-part disconnected while setting material property "'+$propertyName+'" for CL part "'+$targetName+'". HRESULT 0x80010108 (RPC_E_DISCONNECTED).')
-          }
-        }
-      }
-
-      if(-not $setMaterial){
-        throw ('SigmaNEST task-part for "'+$targetName+'" does not expose a writable material property. Tried: Material, MaterialName, Mat.')
-      }
-    }
-
-    if($null -ne $thickness){
-      $task=$null;$taskPart=$null
-      try{$task=$app.TasksList.Items($matchedTaskIndex)}catch{}
-      if($null -eq $task){throw ('Could not reacquire SigmaNEST task index '+$matchedTaskIndex+' for part "'+$targetName+'" before thickness update.')}
-      try{$taskPart=$task.PartsList.Items($matchedPartIndex)}catch{}
-      if($null -eq $taskPart){throw ('Could not reacquire SigmaNEST task-part index '+$matchedPartIndex+' for part "'+$targetName+'" before thickness update.')}
-
-      $setThickness=$false
-      foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
-        try{
-          $taskPart.$propertyName=$thickness
-          $readBack=[double]$taskPart.$propertyName
-          if($readBack -eq $thickness){
-            $setThickness=$true
-            break
-          }
-        }catch{
-          if(SN-IsDisconnected $_){
-            throw ('SigmaNEST COM task-part disconnected while setting thickness property "'+$propertyName+'" for CL part "'+$targetName+'". HRESULT 0x80010108 (RPC_E_DISCONNECTED).')
-          }
-        }
-      }
-
-      if(-not $setThickness){
-        throw ('SigmaNEST task-part for "'+$targetName+'" does not expose a writable thickness property. Tried: Thickness, SheetThickness, Thk, MaterialThickness.')
-      }
-    }
-  }
-}
-
-function SN-Set-TaskPartQuantity($app,$requestParts){
-  $taskCount=0
-  try{$taskCount=[int]$app.TasksList.Count}catch{}
-  if($taskCount -le 0){
-    throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL quantities safely.'
-  }
-
-  foreach($rp in @($requestParts)){
-    $targetName=[string]$rp.part
-    $quantity=SN-Scalar-Int -value $rp.qty -default 1
-    if($quantity -lt 1){$quantity=1}
-    $matched=$false
-
-    for($ti=0;$ti -lt $taskCount -and -not $matched;$ti++){
-      $task=$null
-      try{$task=$app.TasksList.Items($ti)}catch{continue}
-      if($null -eq $task){continue}
-
-      $taskPartCount=0
-      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
-      if($taskPartCount -le 0){continue}
-
-      for($pi=0;$pi -lt $taskPartCount -and -not $matched;$pi++){
-        $taskPart=$null
-        try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
-        if($null -eq $taskPart){continue}
-
-        $taskPartName=''
-        try{$taskPartName=[string]$taskPart.Name}catch{}
-        if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not (SN-TaskPartNameMatches $taskPartName $targetName)){continue}
-
-        $set=$null
-        $readBack=$null
-        foreach($propertyName in @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','Quantity','Qty','QtyRequired','QtyReq')){
-          try{
-            $taskPart.$propertyName=$quantity
-            $readBack=[double]$taskPart.$propertyName
-            if($readBack -eq $quantity){
-              $set=$propertyName
-              break
-            }
-          }catch{}
-        }
-
-        if(-not $set){
-          throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task index='+$ti+'.')
-        }
-
-        $matched=$true
-      }
-    }
-
-    if(-not $matched){
-      throw ('Could not find CL part "'+$targetName+'" inside any SigmaNEST task after task creation.')
-    }
-  }
-}
-function SN-Resolve-WS-Path($Request){
-  $wsDir=[string]$Request.wsDirectory
-  if([string]::IsNullOrWhiteSpace($wsDir)){
-    $wsRoot=[string]$Request.wsRoot
-    if([string]::IsNullOrWhiteSpace($wsRoot)){
-      try{
-        $parent=[IO.Directory]::GetParent([string]$Request.libraryRoot)
-        if($parent){$wsRoot=$parent.FullName}
-      }catch{}
-    }
-    if(-not [string]::IsNullOrWhiteSpace($wsRoot)){
-      try{$wsDir=Join-Path -Path $wsRoot -ChildPath 'WS'}catch{}
-    }
-  }
-  if([string]::IsNullOrWhiteSpace($wsDir)){throw 'SigmaNEST WS output folder could not be determined.'}
-  $wsDir=[IO.Path]::GetFullPath($wsDir.Trim())
-  if(-not(Test-Path -LiteralPath $wsDir)){New-Item -ItemType Directory -Path $wsDir -Force|Out-Null}
-  return $wsDir
-}
-
-function SN-Save-WorkspaceVerified($app,[string]$wsPath,[string]$label){
-  $errors=@()
-  for($attempt=1;$attempt -le 3;$attempt++){
-    try{
-      [void]$app.SaveWorkSpaceFile([string]$wsPath)
-      Start-Sleep -Milliseconds 350
-      if(Test-Path -LiteralPath $wsPath){
-        return [pscustomobject]@{ok=$true;attempt=$attempt;path=$wsPath;label=$label}
-      }
-    }catch{
-      $errors+=('Attempt '+$attempt+': '+(SN-ErrorText $_))
-    }
-    if($attempt -lt 3){Start-Sleep -Milliseconds 500}
-  }
-  throw ('Automatic '+$label+' workspace save failed: '+$wsPath+'. '+($errors -join ' | '))
-}
-
-function Invoke-SigmaNestImportGeometry($Request){
-  $phase='START';$app=$null;$created=@();$partUpdates=@();$taskData=@()
-  try{
-    if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'SigmaNEST COM requires STA.'}
-    $app=New-Object -ComObject SigmaNEST.SNApp
-    if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
-    $wsDir=SN-Resolve-WS-Path -Request $Request
-    $job=[string]$Request.jobName
-    if([string]::IsNullOrWhiteSpace($job)){throw 'Job name is required.'}
-    $safe=($job -replace '[^A-Za-z0-9._ -]','_').Trim()
-    if([string]::IsNullOrWhiteSpace($safe)){$safe='CL_JOB'}
-    $wsPath=Join-Path $wsDir ($safe+'.ws')
-    if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
-    try{$app.PartsLibrary.Directory=[string]$Request.libraryRoot}catch{}
-    $phase='IMPORT_PARTS'
-    $before=SN-Parts-Count $app
-    $queued=@()
-    foreach($x in @($Request.parts)){
-      $source=[string]$x.sourcePath
-      if([string]::IsNullOrWhiteSpace($source)){$source=[string]$x.prsPath}
-      if([string]::IsNullOrWhiteSpace($source)){continue}
-      [void](SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty}))
-      $qty=SN-Scalar-Int -value $x.qty -default 1
-      if($qty -lt 1){$qty=1}
-      $created += [pscustomobject]@{part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial;thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN);sourcePath=$source;sourceType=[string]$x.sourceType;matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1;workspaceIndex=($before+$queued.Count)}
-      $queued += [pscustomobject]@{part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=[string]$x.sourceType;sourceSheets=@($x.sourceSheets);sourceRows=@($x.sourceRows);batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1}
-    }
-    if($queued.Count -eq 0){throw 'No geometry was found to import.'}
-    $phase='COMMIT_IMPORTED_PARTS'
-    $app.CreatePartsListForNewPartsInWS()
-    $after=SN-Parts-Count $app
-    if($after -lt ($before+$queued.Count)){throw ('SigmaNEST committed '+($after-$before)+' part(s) but '+$queued.Count+' were requested.')}
-    $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued -jobName $safe -linkFile ([string]$Request.clLinkFile)
-    $phase='CREATE_TASKS'
-    $app.CreateTasksListForNewPartsInWS()
-    $taskCount=0
-    try{$taskCount=[int]$app.TasksList.Count}catch{}
-    if($taskCount -le 0){throw 'SigmaNEST created no TasksList entries after CL part data was applied.'}
-    $phase='APPLY_TASK_CL_DATA'
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $queued
-    SN-Set-TaskPartQuantity -app $app -requestParts $queued
-    $phase='SAVE_WORKSPACE'
-    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data import')
-    $phase='VERIFY_SAVED_CL_DATA'
-    $app.LoadWorkSpaceFile([string]$wsPath)
-    SN-Verify-WorkspaceCLData -app $app -requestParts $queued
-    SN-Verify-WorkspaceTaskData -app $app -requestParts $queued
-    $taskData=@([pscustomobject]@{taskIndex='';material='';thickness='';batchMultiplier=1;labelApplied=$false;batchApplied=$false;partCount=$taskCount;batchProperty='CL DATA TASKS'})
-    return [pscustomobject]@{ok=$true;phase='IMPORT_COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;partUpdates=@($partUpdates);clLinkFile=[string]$Request.clLinkFile;tasksCreated=$taskCount;taskData=@($taskData);message=('Geometry imported from the selected source files, CL material/thickness/quantity applied to both PartsList and TasksList, verified after save, and saved to '+$wsPath+'. AutoTask was not run.');sourceCount=$created.Count}
-  }catch{
-    $exists=$false;try{$exists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
-    return [pscustomobject]@{ok=$false;phase=$phase;wsPath=$(if($exists){[string]$wsPath}else{''});parts=$created;partCount=@($created).Count;partUpdates=@($partUpdates);tasksCreated=0;taskData=@();checkpointSaved=$exists;error=$_.Exception.Message;message=$(if($exists){'SigmaNEST created a workspace checkpoint before failure: '+$wsPath}else{'Geometry import failed before a verified workspace save.'})}
-  }finally{
-    if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}
-  }
-}
-function Invoke-SigmaNestAutoTask($Request){
-  $phase='START';$app=$null
-  try{
-    if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'SigmaNEST COM requires STA.'}
-    $wsPath=[IO.Path]::GetFullPath([string]$Request.wsPath)
-    if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST WS not found: '+$wsPath)}
-    $app=New-Object -ComObject SigmaNEST.SNApp
-    if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
-    $phase='LOAD_WORKSPACE'
-    $app.LoadWorkSpaceFile([string]$wsPath)
-    $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $jobName
-    $phase='AUTO_TASK'
-    $app.AutoTask()
-    Start-Sleep -Milliseconds 500
-    $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
-    if($taskCount -le 0){throw 'SigmaNEST AutoTask completed but created no tasks.'}
-    $phase='APPLY_TASK_CL_DATA'
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
-    SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
-    $phase='LABEL_AND_BATCH'
-    $taskData=SN-Set-TaskNameAndBatch -app $app -requestParts $Request.parts
-    $phase='SAVE'
-    $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
-    $ok=($taskData.warnings.Count -eq 0)
-    return [pscustomobject]@{
-      ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
-      taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@($partUpdates)
-      message=$(if($ok){'AutoTask created, labeled and batched '+$taskCount+' task(s).'}else{'AutoTask created '+$taskCount+' task(s) with warnings; see the Release Summary.'})
-    }
-  }catch{
-    return [pscustomobject]@{
-      ok=$false;phase=$phase;wsPath=$wsPath;tasksCreated=0;taskData=@();warnings=@($_.Exception.Message)
-      message=('AutoTask failed at '+$phase+': '+$_.Exception.Message)
-    }
-  }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
-}
-
-function Invoke-SigmaNestBuild($Request){
-  $phase='START';$app=$null
-  try{
-    $apartment=[Threading.Thread]::CurrentThread.GetApartmentState()
-    if($apartment -ne [Threading.ApartmentState]::STA){throw ('Current PowerShell thread is '+$apartment+'; SigmaNEST COM requires STA.')}
-    $phase='CREATE_COM';$app=New-Object -ComObject SigmaNEST.SNApp;if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
-    $phase='RESOLVE_WS_PATH';$wsDir=[string]$Request.wsDirectory
-    if([string]::IsNullOrWhiteSpace($wsDir)){
-      $wsRoot=[string]$Request.wsRoot
-      if([string]::IsNullOrWhiteSpace($wsRoot)){try{$parent=[IO.Directory]::GetParent([string]$Request.libraryRoot);if($parent){$wsRoot=$parent.FullName}}catch{}}
-      if(-not [string]::IsNullOrWhiteSpace($wsRoot)){try{$wsDir=Join-Path -Path $wsRoot -ChildPath 'WS'}catch{}}
-    }
-    if([string]::IsNullOrWhiteSpace($wsDir)){throw 'SigmaNEST WS output folder could not be determined. Configure the SigmaNEST WS folder (PathID 0) or verify the PRS library path.'}
-    $wsDir=[IO.Path]::GetFullPath($wsDir.Trim());if(-not(Test-Path -LiteralPath $wsDir)){New-Item -ItemType Directory -Path $wsDir -Force|Out-Null}
-    $job=[string]$Request.jobName;if([string]::IsNullOrWhiteSpace($job)){throw 'Job name is required.'}
-    $safe=($job -replace '[^A-Za-z0-9._ -]','_').Trim();if([string]::IsNullOrWhiteSpace($safe)){$safe='CL_JOB'}
-    $wsPath=Join-Path -Path $wsDir -ChildPath ($safe+'.ws');if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
-    $phase='CONFIGURE_LIBRARY';try{$app.PartsLibrary.Directory=[string]$Request.libraryRoot}catch{}
-    $phase='IMPORT_PARTS';$created=@();$queued=@()
-    $beforeParts=SN-Parts-Count $app
-    foreach($x in @($Request.parts)){
-      $sourcePath=[string]$x.sourcePath;$sourceType=[string]$x.sourceType
-      if([string]::IsNullOrWhiteSpace($sourcePath)){$sourcePath=[string]$x.prsPath;if(-not $sourceType){$sourceType='PRS'}}
-      if([string]::IsNullOrWhiteSpace($sourcePath)){continue}
-
-      $load=SN-Queue-Geometry -app $app -sourcePath $sourcePath -sourceType $sourceType
-      $quantity=SN-Scalar-Int -value $x.qty -default 1;if($quantity -lt 1){$quantity=1}
-      $material=[string]$x.sigmaMaterial
-      $thicknessText=$(if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){[string]$x.thicknessMm}else{''})
-      $queued += [pscustomobject]@{
-        request=$x
-        sourcePath=$sourcePath
-        sourceType=$sourceType
-        method=$load.method
-      }
-      $created += [pscustomobject]@{
-        part=[string]$x.part
-        qty=$quantity
-        material=$material
-        thickness=$thicknessText
-        quantityProperty='TASK_PART_PENDING'
-        materialProperty='TASK_PENDING'
-        thicknessProperty='TASK_PENDING'
-        sourcePath=$sourcePath
-        sourceType=$sourceType
-        sourceProperty=''
-        batchMultiplier=$x.batchMultiplier
-        taskBatches=@($x.taskBatches)
-      }
-    }
-
-    if($queued.Count -eq 0){
-      throw 'No geometry was queued for SigmaNEST import.'
-    }
-
-    $phase='COMMIT_IMPORTED_PARTS';$app.CreatePartsListForNewPartsInWS()
-    $afterParts=SN-Parts-Count $app
-    if($afterParts -lt ($beforeParts+$queued.Count)){
-      throw ('SigmaNEST committed '+($afterParts-$beforeParts)+' part(s) but '+$queued.Count+' part(s) were requested for import.')
-    }
-
-    # Autosave the geometry workspace immediately after the imported parts are
-    # committed. This guarantees a usable .ws exists even if later Task Setup
-    # automation fails or disconnects a COM proxy.
-    $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $safe -linkFile ([string]$Request.clLinkFile)
-
-    $phase='SAVE_GEOMETRY_CHECKPOINT'
-    $saved=$false
-    $saveErrors=@()
-    for($attempt=1;$attempt -le 3 -and -not $saved;$attempt++){
-      try{
-        [void]$app.SaveWorkSpaceFile([string]$wsPath)
-        Start-Sleep -Milliseconds 350
-        $saved=Test-Path -LiteralPath $wsPath
-      }catch{
-        $saveErrors+=('Attempt '+$attempt+': '+(SN-ErrorText $_))
-        if($attempt -lt 3){Start-Sleep -Milliseconds 500}
-      }
-    }
-    if(-not $saved){
-      throw ('SigmaNEST imported '+($afterParts-$beforeParts)+' part(s), but the automatic .ws save did not produce a file: '+$wsPath+'. '+($saveErrors -join ' | '))
-    }
-
-    $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
-    # Save again after the task list exists so the workspace remains resumable
-    # if a later task attribute or quantity update fails.
-    $phase='SAVE_TASK_CHECKPOINT'
-    $savedTask=$false
-    try{
-      [void]$app.SaveWorkSpaceFile([string]$wsPath)
-      Start-Sleep -Milliseconds 350
-      $savedTask=Test-Path -LiteralPath $wsPath
-    }catch{}
-    if(-not $savedTask){
-      throw ('SigmaNEST task list was created, but the automatic task checkpoint could not be confirmed on disk: '+$wsPath)
-    }
-    $phase='APPLY_TASK_CL_DATA'
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
-    $phase='APPLY_TASK_QUANTITIES'
-    SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
-    $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
-    try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.13.2';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
-  }catch{
-    $checkpointExists=$false
-    try{$checkpointExists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
-    return [pscustomobject]@{
-      ok=$false
-      creatorVersion='DIRECT-COM-1.8'
-      phase=$phase
-      error=$_.Exception.Message
-      category=$_.CategoryInfo.ToString()
-      wsPath=$(if($checkpointExists){[string]$wsPath}else{''})
-      parts=$created
-      partCount=@($created).Count
-      checkpointSaved=$checkpointExists
-      message=$(if($checkpointExists){'SigmaNEST created a geometry/workspace checkpoint before the failure: '+[string]$wsPath}else{'SigmaNEST build failed before a workspace checkpoint was saved.'})
-    }
-  }
-  finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
-},''
-  $s=$s -replace '\.[Dd][Xx][Ff]
-  $taskCount=0
-  try{$taskCount=[int]$app.TasksList.Count}catch{}
-  if($taskCount -le 0){
-    throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL material/thickness safely.'
-  }
-
-  foreach($rp in @($requestParts)){
-    $targetName=[string]$rp.part
-    $material=[string]$rp.sigmaMaterial
-    $thickness=$null
-    try{
-      if($rp.thicknessMm -ne $null -and -not [double]::IsNaN([double]$rp.thicknessMm)){
-        $thickness=[double]$rp.thicknessMm
-      }
-    }catch{}
-
-    $matched=$false
-    $matchedTaskIndex=-1
-    $matchedPartIndex=-1
-
-    for($ti=0;$ti -lt $taskCount -and -not $matched;$ti++){
-      $task=$null
-      try{$task=$app.TasksList.Items($ti)}catch{continue}
-      if($null -eq $task){continue}
-
-      $taskPartCount=0
-      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
-      if($taskPartCount -le 0){continue}
-
-      for($pi=0;$pi -lt $taskPartCount;$pi++){
-        $taskPart=$null
-        try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
-        if($null -eq $taskPart){continue}
-        $taskPartName=''
-        try{$taskPartName=[string]$taskPart.Name}catch{}
-        if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not (SN-TaskPartNameMatches $taskPartName $targetName)){continue}
-
-        $matched=$true
-        $matchedTaskIndex=$ti
-        $matchedPartIndex=$pi
-        break
-      }
-    }
-
-    if(-not $matched){
-      throw ('Could not find CL part "'+$targetName+'" inside any SigmaNEST task after task creation.')
-    }
-
-    # Reacquire the COM task/part immediately before each mutation. SigmaNEST
-    # may rebuild the task tree when Task Setup data changes, invalidating
-    # previously returned COM interfaces.
-    if(-not [string]::IsNullOrWhiteSpace($material)){
-      $task=$null;$taskPart=$null
-      try{$task=$app.TasksList.Items($matchedTaskIndex)}catch{}
-      if($null -eq $task){throw ('Could not reacquire SigmaNEST task index '+$matchedTaskIndex+' for part "'+$targetName+'".')}
-      try{$taskPart=$task.PartsList.Items($matchedPartIndex)}catch{}
-      if($null -eq $taskPart){throw ('Could not reacquire SigmaNEST task-part index '+$matchedPartIndex+' for part "'+$targetName+'".')}
-
-      $setMaterial=$false
-      foreach($propertyName in @('Material','MaterialName','Mat')){
-        try{
-          $taskPart.$propertyName=$material
-          $readBack=[string]$taskPart.$propertyName
-          if($readBack.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){
-            $setMaterial=$true
-            break
-          }
-        }catch{
-          if(SN-IsDisconnected $_){
-            throw ('SigmaNEST COM task-part disconnected while setting material property "'+$propertyName+'" for CL part "'+$targetName+'". HRESULT 0x80010108 (RPC_E_DISCONNECTED).')
-          }
-        }
-      }
-
-      if(-not $setMaterial){
-        throw ('SigmaNEST task-part for "'+$targetName+'" does not expose a writable material property. Tried: Material, MaterialName, Mat.')
-      }
-    }
-
-    if($null -ne $thickness){
-      $task=$null;$taskPart=$null
-      try{$task=$app.TasksList.Items($matchedTaskIndex)}catch{}
-      if($null -eq $task){throw ('Could not reacquire SigmaNEST task index '+$matchedTaskIndex+' for part "'+$targetName+'" before thickness update.')}
-      try{$taskPart=$task.PartsList.Items($matchedPartIndex)}catch{}
-      if($null -eq $taskPart){throw ('Could not reacquire SigmaNEST task-part index '+$matchedPartIndex+' for part "'+$targetName+'" before thickness update.')}
-
-      $setThickness=$false
-      foreach($propertyName in @('Thickness','SheetThickness','Thk','MaterialThickness')){
-        try{
-          $taskPart.$propertyName=$thickness
-          $readBack=[double]$taskPart.$propertyName
-          if($readBack -eq $thickness){
-            $setThickness=$true
-            break
-          }
-        }catch{
-          if(SN-IsDisconnected $_){
-            throw ('SigmaNEST COM task-part disconnected while setting thickness property "'+$propertyName+'" for CL part "'+$targetName+'". HRESULT 0x80010108 (RPC_E_DISCONNECTED).')
-          }
-        }
-      }
-
-      if(-not $setThickness){
-        throw ('SigmaNEST task-part for "'+$targetName+'" does not expose a writable thickness property. Tried: Thickness, SheetThickness, Thk, MaterialThickness.')
-      }
-    }
-  }
-}
-
-function SN-Set-TaskPartQuantity($app,$requestParts){
-  $taskCount=0
-  try{$taskCount=[int]$app.TasksList.Count}catch{}
-  if($taskCount -le 0){
-    throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL quantities safely.'
-  }
-
-  foreach($rp in @($requestParts)){
-    $targetName=[string]$rp.part
-    $quantity=SN-Scalar-Int -value $rp.qty -default 1
-    if($quantity -lt 1){$quantity=1}
-    $matched=$false
-
-    for($ti=0;$ti -lt $taskCount -and -not $matched;$ti++){
-      $task=$null
-      try{$task=$app.TasksList.Items($ti)}catch{continue}
-      if($null -eq $task){continue}
-
-      $taskPartCount=0
-      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
-      if($taskPartCount -le 0){continue}
-
-      for($pi=0;$pi -lt $taskPartCount -and -not $matched;$pi++){
-        $taskPart=$null
-        try{$taskPart=$task.PartsList.Items($pi)}catch{continue}
-        if($null -eq $taskPart){continue}
-
-        $taskPartName=''
-        try{$taskPartName=[string]$taskPart.Name}catch{}
-        if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not (SN-TaskPartNameMatches $taskPartName $targetName)){continue}
-
-        $set=$null
-        $readBack=$null
-        foreach($propertyName in @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','Quantity','Qty','QtyRequired','QtyReq')){
-          try{
-            $taskPart.$propertyName=$quantity
-            $readBack=[double]$taskPart.$propertyName
-            if($readBack -eq $quantity){
-              $set=$propertyName
-              break
-            }
-          }catch{}
-        }
-
-        if(-not $set){
-          throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task index='+$ti+'.')
-        }
-
-        $matched=$true
-      }
-    }
-
-    if(-not $matched){
-      throw ('Could not find CL part "'+$targetName+'" inside any SigmaNEST task after task creation.')
-    }
-  }
-}
-function SN-Resolve-WS-Path($Request){
-  $wsDir=[string]$Request.wsDirectory
-  if([string]::IsNullOrWhiteSpace($wsDir)){
-    $wsRoot=[string]$Request.wsRoot
-    if([string]::IsNullOrWhiteSpace($wsRoot)){
-      try{
-        $parent=[IO.Directory]::GetParent([string]$Request.libraryRoot)
-        if($parent){$wsRoot=$parent.FullName}
-      }catch{}
-    }
-    if(-not [string]::IsNullOrWhiteSpace($wsRoot)){
-      try{$wsDir=Join-Path -Path $wsRoot -ChildPath 'WS'}catch{}
-    }
-  }
-  if([string]::IsNullOrWhiteSpace($wsDir)){throw 'SigmaNEST WS output folder could not be determined.'}
-  $wsDir=[IO.Path]::GetFullPath($wsDir.Trim())
-  if(-not(Test-Path -LiteralPath $wsDir)){New-Item -ItemType Directory -Path $wsDir -Force|Out-Null}
-  return $wsDir
-}
-
-function SN-Save-WorkspaceVerified($app,[string]$wsPath,[string]$label){
-  $errors=@()
-  for($attempt=1;$attempt -le 3;$attempt++){
-    try{
-      [void]$app.SaveWorkSpaceFile([string]$wsPath)
-      Start-Sleep -Milliseconds 350
-      if(Test-Path -LiteralPath $wsPath){
-        return [pscustomobject]@{ok=$true;attempt=$attempt;path=$wsPath;label=$label}
-      }
-    }catch{
-      $errors+=('Attempt '+$attempt+': '+(SN-ErrorText $_))
-    }
-    if($attempt -lt 3){Start-Sleep -Milliseconds 500}
-  }
-  throw ('Automatic '+$label+' workspace save failed: '+$wsPath+'. '+($errors -join ' | '))
-}
-
-function Invoke-SigmaNestImportGeometry($Request){
-  $phase='START';$app=$null;$created=@();$partUpdates=@()
-  try{
-    if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'SigmaNEST COM requires STA.'}
-    $app=New-Object -ComObject SigmaNEST.SNApp
-    if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
-    $wsDir=SN-Resolve-WS-Path -Request $Request
-    $job=[string]$Request.jobName
-    if([string]::IsNullOrWhiteSpace($job)){throw 'Job name is required.'}
-    $safe=($job -replace '[^A-Za-z0-9._ -]','_').Trim()
-    if([string]::IsNullOrWhiteSpace($safe)){$safe='CL_JOB'}
-    $wsPath=Join-Path $wsDir ($safe+'.ws')
-    if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
-    try{$app.PartsLibrary.Directory=[string]$Request.libraryRoot}catch{}
-    $phase='IMPORT_PARTS'
-    $before=SN-Parts-Count $app
-    $queued=@()
-    $queuedIndex=0
-    foreach($x in @($Request.parts)){
-      $source=[string]$x.sourcePath
-      if([string]::IsNullOrWhiteSpace($source)){$source=[string]$x.prsPath}
-      if([string]::IsNullOrWhiteSpace($source)){continue}
-      $clData=[pscustomobject]@{
-        sigmaMaterial=[string]$x.sigmaMaterial
-        thicknessMm=$x.thicknessMm
-        qty=$x.qty
-      }
-      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData $clData
-      $qty=SN-Scalar-Int -value $x.qty -default 1
-      if($qty -lt 1){$qty=1}
-      $workspaceIndex=$before+$queuedIndex
-      $created+=[pscustomobject]@{
-        part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial
-        thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN)
-        sourcePath=$source;sourceType=[string]$x.sourceType
-        matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
-        workspaceIndex=$workspaceIndex
-      }
-      $queued += [pscustomobject]@{
-        part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial
-        thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=[string]$x.sourceType
-      }
-      $queuedIndex++
-    }
-    if($queued.Count -eq 0){throw 'No geometry was found to import.'}
-    $phase='COMMIT_IMPORTED_PARTS'
-    $app.CreatePartsListForNewPartsInWS()
-    $after=SN-Parts-Count $app
-    if($after -lt ($before+$queued.Count)){throw ('SigmaNEST committed '+($after-$before)+' part(s) but '+$queued.Count+' were requested.')}
-    $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $job -linkFile ([string]$Request.clLinkFile)
-    $phase='SAVE_GEOMETRY'
-    $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'geometry'
-    $phase='VERIFY_SAVED_CL_DATA'
-    $app.LoadWorkSpaceFile([string]$wsPath)
-    $verify=SN-Verify-WorkspaceCLData -app $app -requestParts $queued
-    return [pscustomobject]@{
-      ok=$true;phase='IMPORT_COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count
-      partUpdates=@($partUpdates);clLinkFile=[string]$Request.clLinkFile;tasksCreated=0;message=('Geometry imported, CL data applied, and saved to '+$wsPath)
-      sourceCount=$created.Count
-    }
-  }catch{
-    $exists=$false;try{$exists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
-    return [pscustomobject]@{
-      ok=$false;phase=$phase;wsPath=$(if($exists){[string]$wsPath}else{''})
-      parts=$created;partCount=@($created).Count;partUpdates=@($partUpdates)
-      checkpointSaved=$exists;error=$_.Exception.Message
-      message=$(if($exists){'Geometry workspace saved before failure: '+$wsPath}else{'Geometry import failed before a verified workspace save.'})
-    }
-  }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
-}
-
-function SN-Set-TaskNameAndBatch($app,$requestParts){
-  $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
-  $map=@{};foreach($rp in @($requestParts)){$map[[string]$rp.part]=$rp}
-  $results=@();$warnings=@()
-  for($ti=0;$ti -lt $taskCount;$ti++){
-    $task=$null;try{$task=$app.TasksList.Items($ti)}catch{continue}
-    if($null -eq $task){continue}
-    $names=@();$materials=@();$thks=@();$multis=@()
-    $pc=0;try{$pc=[int]$task.PartsList.Count}catch{}
-    for($pi=0;$pi -lt $pc;$pi++){
-      try{$tp=$task.PartsList.Items($pi)}catch{continue}
-      $pn='';try{$pn=[string]$tp.Name}catch{}
-      if($map.ContainsKey($pn)){
-        $rp=$map[$pn];$names+=$pn
-        if(-not [string]::IsNullOrWhiteSpace([string]$rp.sigmaMaterial)){$materials+=[string]$rp.sigmaMaterial}
-        $th=[double](SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN))
-        if(-not [double]::IsNaN($th)){$thks+=$th}
-        foreach($tb in @($rp.taskBatches)){
-          $multis+=SN-Scalar-Int -value $tb.batchMultiplier -default 1
-        }
-        if($multis.Count -eq 0){$multis+=SN-Scalar-Int -value $rp.batchMultiplier -default 1}
-      }
-    }
-    if($names.Count -eq 0){continue}
-    $mat=if($materials.Count){$materials[0]}else{'UNKNOWN MATERIAL'}
-    $thk=if($thks.Count){$thks[0]}else{0}
-    $uniqueMulti=@($multis|Sort-Object -Unique)
-    $label=('{0:00} | {1} | {2:0.###}mm' -f ($ti+1),$mat,$thk)
-    $labelApplied=$false;$labelProp=''
-    foreach($prop in @('Name','TaskName','Description')){
-      try{
-        $task.$prop=$label
-        $back=[string]$task.$prop
-        if($back.Trim().Equals($label.Trim(),[StringComparison]::OrdinalIgnoreCase)){$labelApplied=$true;$labelProp=$prop;break}
-      }catch{}
-    }
-    if(-not $labelApplied){$warnings+=('Task '+($ti+1)+' could not be renamed; material/thickness grouping still exists.')}
-    $batchApplied=$false;$batchProp='';$batch=1
-    if($uniqueMulti.Count -eq 1){
-      $batch=SN-Scalar-Int -value $uniqueMulti[0] -default 1
-      if($batch -lt 1){$batch=1}
-      foreach($prop in @('BatchMultiplier','BatchQty','BatchQuantity','Batch')){
-        try{
-          $task.$prop=$batch
-          $back=SN-Scalar-Int -value $task.$prop -default -1
-          if($back -eq $batch){$batchApplied=$true;$batchProp=$prop;break}
-        }catch{}
-      }
-      if(-not $batchApplied){
-        foreach($pi in 0..([math]::Max(0,$pc-1))){
-          try{$tp=$task.PartsList.Items($pi)}catch{continue}
-          foreach($prop in @('BatchQty','BatchMultiplier','BatchQuantity','Batch')){
-            try{
-              $tp.$prop=$batch
-              $back=SN-Scalar-Int -value $tp.$prop -default -1
-              if($back -eq $batch){$batchApplied=$true;$batchProp='PART.'+$prop;break}
-            }catch{}
-          }
-          if($batchApplied){break}
-        }
-      }
-    }else{
-      $warnings+=('Task '+($ti+1)+' has mixed CL multipliers: '+($uniqueMulti -join ', ')+'. No multiplier was guessed.')
-    }
-    if(-not $batchApplied -and $uniqueMulti.Count -eq 1){
-      $warnings+=('Task '+($ti+1)+' could not accept Batch multiplier x'+$batch+'.')
-    }
-    $results+=[pscustomobject]@{
-      taskIndex=$ti+1;taskName=$label;material=$mat;thickness=$thk;batchMultiplier=$batch
-      batchApplied=$batchApplied;batchProperty=$batchProp;labelApplied=$labelApplied;labelProperty=$labelProp
-      partCount=$names.Count;multipliers=($uniqueMulti -join ',')
-    }
-  }
-  return [pscustomobject]@{tasks=@($results);warnings=@($warnings)}
-}
-
-function Invoke-SigmaNestAutoTask($Request){
-  $phase='START';$app=$null
-  try{
-    if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'SigmaNEST COM requires STA.'}
-    $wsPath=[IO.Path]::GetFullPath([string]$Request.wsPath)
-    if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST WS not found: '+$wsPath)}
-    $app=New-Object -ComObject SigmaNEST.SNApp
-    if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
-    $phase='LOAD_WORKSPACE'
-    $app.LoadWorkSpaceFile([string]$wsPath)
-    $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $jobName
-    $phase='AUTO_TASK'
-    $app.AutoTask()
-    Start-Sleep -Milliseconds 500
-    $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
-    if($taskCount -le 0){throw 'SigmaNEST AutoTask completed but created no tasks.'}
-    $phase='APPLY_TASK_CL_DATA'
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
-    SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
-    $phase='LABEL_AND_BATCH'
-    $taskData=SN-Set-TaskNameAndBatch -app $app -requestParts $Request.parts
-    $phase='SAVE'
-    $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
-    $ok=($taskData.warnings.Count -eq 0)
-    return [pscustomobject]@{
-      ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
-      taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@($partUpdates)
-      message=$(if($ok){'AutoTask created, labeled and batched '+$taskCount+' task(s).'}else{'AutoTask created '+$taskCount+' task(s) with warnings; see the Release Summary.'})
-    }
-  }catch{
-    return [pscustomobject]@{
-      ok=$false;phase=$phase;wsPath=$wsPath;tasksCreated=0;taskData=@();warnings=@($_.Exception.Message)
-      message=('AutoTask failed at '+$phase+': '+$_.Exception.Message)
-    }
-  }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
-}
-
-function Invoke-SigmaNestBuild($Request){
-  $phase='START';$app=$null
-  try{
-    $apartment=[Threading.Thread]::CurrentThread.GetApartmentState()
-    if($apartment -ne [Threading.ApartmentState]::STA){throw ('Current PowerShell thread is '+$apartment+'; SigmaNEST COM requires STA.')}
-    $phase='CREATE_COM';$app=New-Object -ComObject SigmaNEST.SNApp;if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
-    $phase='RESOLVE_WS_PATH';$wsDir=[string]$Request.wsDirectory
-    if([string]::IsNullOrWhiteSpace($wsDir)){
-      $wsRoot=[string]$Request.wsRoot
-      if([string]::IsNullOrWhiteSpace($wsRoot)){try{$parent=[IO.Directory]::GetParent([string]$Request.libraryRoot);if($parent){$wsRoot=$parent.FullName}}catch{}}
-      if(-not [string]::IsNullOrWhiteSpace($wsRoot)){try{$wsDir=Join-Path -Path $wsRoot -ChildPath 'WS'}catch{}}
-    }
-    if([string]::IsNullOrWhiteSpace($wsDir)){throw 'SigmaNEST WS output folder could not be determined. Configure the SigmaNEST WS folder (PathID 0) or verify the PRS library path.'}
-    $wsDir=[IO.Path]::GetFullPath($wsDir.Trim());if(-not(Test-Path -LiteralPath $wsDir)){New-Item -ItemType Directory -Path $wsDir -Force|Out-Null}
-    $job=[string]$Request.jobName;if([string]::IsNullOrWhiteSpace($job)){throw 'Job name is required.'}
-    $safe=($job -replace '[^A-Za-z0-9._ -]','_').Trim();if([string]::IsNullOrWhiteSpace($safe)){$safe='CL_JOB'}
-    $wsPath=Join-Path -Path $wsDir -ChildPath ($safe+'.ws');if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
-    $phase='CONFIGURE_LIBRARY';try{$app.PartsLibrary.Directory=[string]$Request.libraryRoot}catch{}
-    $phase='IMPORT_PARTS';$created=@();$queued=@()
-    $beforeParts=SN-Parts-Count $app
-    foreach($x in @($Request.parts)){
-      $sourcePath=[string]$x.sourcePath;$sourceType=[string]$x.sourceType
-      if([string]::IsNullOrWhiteSpace($sourcePath)){$sourcePath=[string]$x.prsPath;if(-not $sourceType){$sourceType='PRS'}}
-      if([string]::IsNullOrWhiteSpace($sourcePath)){continue}
-
-      $load=SN-Queue-Geometry -app $app -sourcePath $sourcePath -sourceType $sourceType
-      $quantity=SN-Scalar-Int -value $x.qty -default 1;if($quantity -lt 1){$quantity=1}
-      $material=[string]$x.sigmaMaterial
-      $thicknessText=$(if($x.thicknessMm -ne $null -and -not [double]::IsNaN([double]$x.thicknessMm)){[string]$x.thicknessMm}else{''})
-      $queued += [pscustomobject]@{
-        request=$x
-        sourcePath=$sourcePath
-        sourceType=$sourceType
-        method=$load.method
-      }
-      $created += [pscustomobject]@{
-        part=[string]$x.part
-        qty=$quantity
-        material=$material
-        thickness=$thicknessText
-        quantityProperty='TASK_PART_PENDING'
-        materialProperty='TASK_PENDING'
-        thicknessProperty='TASK_PENDING'
-        sourcePath=$sourcePath
-        sourceType=$sourceType
-        sourceProperty=''
-        batchMultiplier=$x.batchMultiplier
-        taskBatches=@($x.taskBatches)
-      }
-    }
-
-    if($queued.Count -eq 0){
-      throw 'No geometry was queued for SigmaNEST import.'
-    }
-
-    $phase='COMMIT_IMPORTED_PARTS';$app.CreatePartsListForNewPartsInWS()
-    $afterParts=SN-Parts-Count $app
-    if($afterParts -lt ($beforeParts+$queued.Count)){
-      throw ('SigmaNEST committed '+($afterParts-$beforeParts)+' part(s) but '+$queued.Count+' part(s) were requested for import.')
-    }
-
-    # Autosave the geometry workspace immediately after the imported parts are
-    # committed. This guarantees a usable .ws exists even if later Task Setup
-    # automation fails or disconnects a COM proxy.
-    $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $safe -linkFile ([string]$Request.clLinkFile)
-
-    $phase='SAVE_GEOMETRY_CHECKPOINT'
-    $saved=$false
-    $saveErrors=@()
-    for($attempt=1;$attempt -le 3 -and -not $saved;$attempt++){
-      try{
-        [void]$app.SaveWorkSpaceFile([string]$wsPath)
-        Start-Sleep -Milliseconds 350
-        $saved=Test-Path -LiteralPath $wsPath
-      }catch{
-        $saveErrors+=('Attempt '+$attempt+': '+(SN-ErrorText $_))
-        if($attempt -lt 3){Start-Sleep -Milliseconds 500}
-      }
-    }
-    if(-not $saved){
-      throw ('SigmaNEST imported '+($afterParts-$beforeParts)+' part(s), but the automatic .ws save did not produce a file: '+$wsPath+'. '+($saveErrors -join ' | '))
-    }
-
-    $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
-    # Save again after the task list exists so the workspace remains resumable
-    # if a later task attribute or quantity update fails.
-    $phase='SAVE_TASK_CHECKPOINT'
-    $savedTask=$false
-    try{
-      [void]$app.SaveWorkSpaceFile([string]$wsPath)
-      Start-Sleep -Milliseconds 350
-      $savedTask=Test-Path -LiteralPath $wsPath
-    }catch{}
-    if(-not $savedTask){
-      throw ('SigmaNEST task list was created, but the automatic task checkpoint could not be confirmed on disk: '+$wsPath)
-    }
-    $phase='APPLY_TASK_CL_DATA'
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
-    $phase='APPLY_TASK_QUANTITIES'
-    SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
-    $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
-    try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.13.2';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
-  }catch{
-    $checkpointExists=$false
-    try{$checkpointExists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
-    return [pscustomobject]@{
-      ok=$false
-      creatorVersion='DIRECT-COM-1.8'
-      phase=$phase
-      error=$_.Exception.Message
-      category=$_.CategoryInfo.ToString()
-      wsPath=$(if($checkpointExists){[string]$wsPath}else{''})
-      parts=$created
-      partCount=@($created).Count
-      checkpointSaved=$checkpointExists
-      message=$(if($checkpointExists){'SigmaNEST created a geometry/workspace checkpoint before the failure: '+[string]$wsPath}else{'SigmaNEST build failed before a workspace checkpoint was saved.'})
-    }
-  }
-  finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
-},''
-  return ($s -replace '[^A-Z0-9]','')
-}
-function SN-TaskPartNameMatches([string]$actual,[string]$target){
-  $a=SN-Normalize-TaskPartName $actual
-  $t=SN-Normalize-TaskPartName $target
-  if(-not $a -or -not $t){return $false}
-  return ($a -eq $t)
-}
-function SN-Verify-WorkspaceTaskData($app,$requestParts){
-  $taskCount=0
-  try{$taskCount=[int]$app.TasksList.Count}catch{}
-  if($taskCount -le 0){throw 'SigmaNEST task verification found no tasks.'}
-  foreach($rp in @($requestParts)){
-    $targetName=[string]$rp.part
-    $material=[string]$rp.sigmaMaterial
-    $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
-    $qty=SN-Scalar-Int -value $rp.qty -default 1
-    if($qty -lt 1){$qty=1}
-    $found=$false
-    for($ti=0;$ti -lt $taskCount -and -not $found;$ti++){
-      $task=$null
-      try{$task=$app.TasksList.Items($ti)}catch{continue}
-      if($null -eq $task){continue}
-      $partCount=0
-      try{$partCount=[int]$task.PartsList.Count}catch{}
-      for($pi=0;$pi -lt $partCount -and -not $found;$pi++){
-        $tp=$null
-        try{$tp=$task.PartsList.Items($pi)}catch{continue}
-        if($null -eq $tp){continue}
-        $taskPartName=''
-        try{$taskPartName=[string]$tp.Name}catch{}
-        if(-not (SN-TaskPartNameMatches $taskPartName $targetName)){continue}
-        if(-not [string]::IsNullOrWhiteSpace($material)){
-          $m=$null
-          foreach($pn in @('Material','MaterialName','Mat')){
-            try{$v=[string]$tp.$pn;if($v.Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){$m=$pn;break}}catch{}
-          }
-          if(-not $m){throw ('Post-save verification failed for CL part "'+$targetName+'": task material is not "'+$material+'".')}
-        }
-        if(-not [double]::IsNaN($thickness)){
-          $t=$null
-          foreach($pn in @('Thickness','SheetThickness','Thk','MaterialThickness')){
-            try{$v=SN-Scalar-Number -value $tp.$pn -default ([double]::NaN);if(-not [double]::IsNaN([double]$v) -and $v -eq $thickness){$t=$pn;break}}catch{}
-          }
-          if(-not $t){throw ('Post-save verification failed for CL part "'+$targetName+'": task thickness is not '+$thickness+'mm.')}
-        }
-        $qhit=$null
-        foreach($pn in @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','Quantity','Qty','QtyRequired','QtyReq')){
-          try{$v=SN-Scalar-Int -value $tp.$pn -default -2147483648;if($v -eq $qty){$qhit=$pn;break}}catch{}
-        }
-        if(-not $qhit){throw ('Post-save verification failed for CL part "'+$targetName+'": task quantity is not '+$qty+'.')}
-        $found=$true
-      }
-    }
-    if(-not $found){throw ('Post-save verification could not find CL part "'+$targetName+'" in any SigmaNEST task.')}
-  }
-  return $true
-}
-
 function SN-Set-TaskMaterialAndThickness($app,$requestParts){
   $taskCount=0
   try{$taskCount=[int]$app.TasksList.Count}catch{}
@@ -1817,7 +818,7 @@ function SN-Set-TaskMaterialAndThickness($app,$requestParts){
         $taskPartName=''
         try{$taskPartName=[string]$taskPart.Name}catch{}
         if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not (SN-TaskPartNameMatches $taskPartName $targetName)){continue}
+        if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
 
         $matched=$true
         $matchedTaskIndex=$ti
@@ -1921,11 +922,11 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
         $taskPartName=''
         try{$taskPartName=[string]$taskPart.Name}catch{}
         if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not (SN-TaskPartNameMatches $taskPartName $targetName)){continue}
+        if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
 
         $set=$null
         $readBack=$null
-        foreach($propertyName in @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','Quantity','Qty','QtyRequired','QtyReq')){
+        foreach($propertyName in @('Quantity','Qty','QtyRequired','QtyReq','BatchQty')){
           try{
             $taskPart.$propertyName=$quantity
             $readBack=[double]$taskPart.$propertyName
@@ -2003,32 +1004,15 @@ function Invoke-SigmaNestImportGeometry($Request){
     $phase='IMPORT_PARTS'
     $before=SN-Parts-Count $app
     $queued=@()
-    $queuedIndex=0
     foreach($x in @($Request.parts)){
       $source=[string]$x.sourcePath
       if([string]::IsNullOrWhiteSpace($source)){$source=[string]$x.prsPath}
       if([string]::IsNullOrWhiteSpace($source)){continue}
-      $clData=[pscustomobject]@{
-        sigmaMaterial=[string]$x.sigmaMaterial
-        thicknessMm=$x.thicknessMm
-        qty=$x.qty
-      }
-      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData $clData
+      [void](SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty}))
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
-      $workspaceIndex=$before+$queuedIndex
-      $created+=[pscustomobject]@{
-        part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial
-        thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN)
-        sourcePath=$source;sourceType=[string]$x.sourceType
-        matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
-        workspaceIndex=$workspaceIndex
-      }
-      $queued += [pscustomobject]@{
-        part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial
-        thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=[string]$x.sourceType
-      }
-      $queuedIndex++
+      $created += [pscustomobject]@{part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial;thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN);sourcePath=$source;sourceType=[string]$x.sourceType;matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1}
+      $queued += [pscustomobject]@{part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=[string]$x.sourceType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1;sourceSheets=@($x.sourceSheets);sourceRows=@($x.sourceRows)}
     }
     if($queued.Count -eq 0){throw 'No geometry was found to import.'}
     $phase='COMMIT_IMPORTED_PARTS'
@@ -2036,28 +1020,55 @@ function Invoke-SigmaNestImportGeometry($Request){
     $after=SN-Parts-Count $app
     if($after -lt ($before+$queued.Count)){throw ('SigmaNEST committed '+($after-$before)+' part(s) but '+$queued.Count+' were requested.')}
     $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $job -linkFile ([string]$Request.clLinkFile)
-    $phase='SAVE_GEOMETRY'
-    $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'geometry'
-    $phase='VERIFY_SAVED_CL_DATA'
+    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued -jobName $safe -linkFile ([string]$Request.clLinkFile)
+    $phase='CREATE_TASKS'
+    $app.CreateTasksListForNewPartsInWS()
+    $taskCount=0
+    try{$taskCount=[int]$app.TasksList.Count}catch{}
+    if($taskCount -le 0){throw 'SigmaNEST created no TasksList entries after the CL part records were applied.'}
+    $phase='APPLY_CL_TASK_DATA'
+    SN-Set-TaskMaterialAndThickness -app $app -requestParts $queued
+    SN-Set-TaskPartQuantity -app $app -requestParts $queued
+    $phase='SAVE_WORKSPACE'
+    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data import')
+    $phase='RELOAD_AND_REAPPLY_CL_TASK_DATA'
     $app.LoadWorkSpaceFile([string]$wsPath)
-    $verify=SN-Verify-WorkspaceCLData -app $app -requestParts $queued
+    SN-Set-TaskMaterialAndThickness -app $app -requestParts $queued
+    SN-Set-TaskPartQuantity -app $app -requestParts $queued
+    $phase='SAVE_VERIFIED_WORKSPACE'
+    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'verified CL-data import')
+    $phase='VERIFY_SAVED_CL_PART_DATA'
+    $app.LoadWorkSpaceFile([string]$wsPath)
+    SN-Verify-WorkspaceCLData -app $app -requestParts $queued
     return [pscustomobject]@{
-      ok=$true;phase='IMPORT_COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count
-      partUpdates=@($partUpdates);clLinkFile=[string]$Request.clLinkFile;tasksCreated=0;message=('Geometry imported, CL data applied, and saved to '+$wsPath)
+      ok=$true
+      phase='IMPORT_COMPLETE'
+      wsPath=$wsPath
+      parts=$created
+      partCount=$created.Count
+      partUpdates=@($partUpdates)
+      clLinkFile=[string]$Request.clLinkFile
+      tasksCreated=$taskCount
+      message=('Geometry imported, CL material/thickness/quantity applied to both SigmaNEST part and task records, re-applied after reload, verified, and saved to '+$wsPath+'. AutoTask was not run.')
       sourceCount=$created.Count
     }
   }catch{
-    $exists=$false;try{$exists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
+    $exists=$false
+    try{$exists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
     return [pscustomobject]@{
-      ok=$false;phase=$phase;wsPath=$(if($exists){[string]$wsPath}else{''})
-      parts=$created;partCount=@($created).Count;partUpdates=@($partUpdates)
-      checkpointSaved=$exists;error=$_.Exception.Message
-      message=$(if($exists){'Geometry workspace saved before failure: '+$wsPath}else{'Geometry import failed before a verified workspace save.'})
+      ok=$false
+      phase=$phase
+      wsPath=$(if($exists){[string]$wsPath}else{''})
+      parts=$created
+      partCount=@($created).Count
+      partUpdates=@($partUpdates)
+      tasksCreated=0
+      checkpointSaved=$exists
+      error=$_.Exception.Message
+      message=$(if($exists){'SigmaNEST created a workspace checkpoint before the failure: '+$wsPath}else{'Geometry import failed before a verified workspace save.'})
     }
   }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
 }
-
 function SN-Set-TaskNameAndBatch($app,$requestParts){
   $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
   $map=@{};foreach($rp in @($requestParts)){$map[[string]$rp.part]=$rp}
@@ -2275,7 +1286,7 @@ function Invoke-SigmaNestBuild($Request){
     SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.13.2';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
+    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.13.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
   }catch{
     $checkpointExists=$false
     try{$checkpointExists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
