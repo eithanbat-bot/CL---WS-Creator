@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.12.4'
+$BRIDGE_VERSION = '2.13.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -1020,6 +1020,7 @@ function Prepare-SigmaNestBuild($b){
     }
     $engineRequest=[pscustomobject]@{
       jobName=$name
+      clLinkFile=(Join-Path $staging 'CL_DATA_LINK.json')
       libraryRoot=$jobRoot
       dxfRoot=$dxfRoot
       wsDirectory=[string]$b.wsDirectory
