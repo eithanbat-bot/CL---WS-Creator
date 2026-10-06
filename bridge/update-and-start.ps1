@@ -71,29 +71,62 @@ function Get-ListeningPids([int]$Port){
   @($pids|Sort-Object -Unique)
 }
 
-function Stop-CreatorPortOwners([int]$Port){
+function Test-CreatorProcessOwner([int]$ProcessId,[string]$ServerPath){
+  try{
+    $p=Get-CimInstance Win32_Process -Filter ("ProcessId="+$ProcessId) -ErrorAction Stop
+    if($null -eq $p){return $false}
+    $cmd=[string]$p.CommandLine
+    if([string]::IsNullOrWhiteSpace($cmd)){return $false}
+    $full=[IO.Path]::GetFullPath($ServerPath)
+    return ($cmd -match [regex]::Escape($full) -or $cmd -match '(?i)CL---WS-Creator.*\\bridge\\server.ps1')
+  }catch{return $false}
+}
+
+function Stop-CreatorPortOwners([int]$Port,[string]$ServerPath){
   $owners=@(Get-ListeningPids -Port $Port)
   foreach($id in $owners){
+    if(-not(Test-CreatorProcessOwner -ProcessId $id -ServerPath $ServerPath)){
+      throw ("Creator port "+$Port+" is already owned by PID "+$id+" which does not appear to be the CL-WS Creator bridge. Refusing to terminate an unrelated process.")
+    }
+    Say "Stopping existing CL-WS Creator bridge PID $id on port $Port..." 'Yellow'
+    $stopped=$false
     try{
-      $proc=Get-Process -Id $id -ErrorAction SilentlyContinue
-      if($null -ne $proc){
-        Say "Stopping process PID $id that owns Creator port $Port..."
-        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
-      }
-    }catch{}
+      Stop-Process -Id $id -Force -ErrorAction Stop
+      $stopped=$true
+    }catch{
+      Say "PowerShell stop failed for PID $id; using taskkill /F..." 'Yellow'
+      try{
+        & taskkill.exe /PID $id /F /T >$null 2>&1
+        if($LASTEXITCODE -eq 0){$stopped=$true}
+      }catch{}
+    }
+    if(-not $stopped){
+      throw ("Could not terminate the existing CL-WS Creator bridge PID "+$id+".")
+    }
   }
-  for($i=0;$i -lt 20;$i++){
+
+  for($i=0;$i -lt 40;$i++){
     $remaining=@(Get-ListeningPids -Port $Port)
-    if($remaining.Count -eq 0){return $true}
+    if($remaining.Count -eq 0){
+      Start-Sleep -Milliseconds 250
+      $remaining=@(Get-ListeningPids -Port $Port)
+      if($remaining.Count -eq 0){return $true}
+    }
+    foreach($id in $remaining){
+      if(Test-CreatorProcessOwner -ProcessId $id -ServerPath $ServerPath){
+        try{& taskkill.exe /PID $id /F /T >$null 2>&1}catch{}
+      }else{
+        throw ("Creator port "+$Port+" remains owned by unrelated PID(s): "+($remaining -join ', '))
+      }
+    }
     Start-Sleep -Milliseconds 250
   }
   $remaining=@(Get-ListeningPids -Port $Port)
   if($remaining.Count -gt 0){
-    throw ("Creator port "+$Port+" is still owned by PID(s) "+($remaining -join ', ')+". The old bridge could not be stopped safely.")
+    throw ("Creator port "+$Port+" is still occupied by PID(s) "+($remaining -join ', ')+" after termination attempts.")
   }
   return $true
 }
-
 function Stop-CreatorProcesses([string]$ServerPath){
   try{
     $serverPattern=[regex]::Escape([IO.Path]::GetFullPath($ServerPath))
@@ -249,7 +282,7 @@ try{
   }
 
   Stop-CreatorProcesses -ServerPath $Server
-  Stop-CreatorPortOwners -Port $Port | Out-Null
+  Stop-CreatorPortOwners -Port $Port -ServerPath $Server | Out-Null
 
   $changed=@($install)
   if($manifestInstall){$changed+=[pscustomobject]@{Stage=$remoteManifest;Local=$localManifest;Relative='manifest.xml'}}
