@@ -1185,8 +1185,9 @@ function SN-Set-TaskNameAndBatch($app,$requestParts){
     for($pi=0;$pi -lt $pc;$pi++){
       try{$tp=$task.PartsList.Items($pi)}catch{continue}
       $pn='';try{$pn=[string]$tp.Name}catch{}
-      if($map.ContainsKey($pn)){
-        $rp=$map[$pn];$names+=$pn
+      $rp=SN-Find-RequestForTaskPart -taskPart $tp -requestParts $requestParts
+      if($null -ne $rp){
+        $names+=[string]$tp.Name
         if(-not [string]::IsNullOrWhiteSpace([string]$rp.sigmaMaterial)){$materials+=[string]$rp.sigmaMaterial}
         $th=[double](SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN))
         if(-not [double]::IsNaN($th)){$thks+=$th}
@@ -1257,41 +1258,60 @@ function Invoke-SigmaNestAutoTask($Request){
     if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST WS not found: '+$wsPath)}
     $app=New-Object -ComObject SigmaNEST.SNApp
     if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
+
     $phase='LOAD_WORKSPACE'
     $app.LoadWorkSpaceFile([string]$wsPath)
+
     $phase='APPLY_CL_PART_DATA'
     $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName ([IO.Path]::GetFileNameWithoutExtension($wsPath))
+
     $phase='AUTO_TASK'
     $app.AutoTask()
     Start-Sleep -Milliseconds 500
     $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
     if($taskCount -le 0){throw 'SigmaNEST AutoTask completed but created no tasks.'}
+
     $phase='APPLY_TASK_CL_DATA'
+    # AutoTask groups by the part data available to SigmaNEST. Reapply the
+    # authoritative CL material/thickness/quantity at task-part level and verify
+    # every change before anything is saved.
     SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
     SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
+
     $phase='LABEL_AND_BATCH'
     $taskData=SN-Set-TaskNameAndBatch -app $app -requestParts $Request.parts
-    $allWarnings=@($taskMaterialWarnings)+@($taskData.warnings)
-    $phase='SAVE'
-    $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
+    $allWarnings=@($taskData.warnings)
+
     $phase='SAVE'
     $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
     $app.LoadWorkSpaceFile([string]$wsPath)
     SN-Verify-WorkspaceCLData -app $app -requestParts $Request.parts | Out-Null
     SN-Verify-TaskCLData -app $app -requestParts $Request.parts | Out-Null
-    $allWarnings=@($taskData.warnings)
+
     $ok=($allWarnings.Count -eq 0)
     return [pscustomobject]@{
-      ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
-      taskData=$taskData.tasks;warnings=$allWarnings;partUpdates=@($partUpdates)
-      message=$(if($ok){'AutoTask created, labeled and batched '+$taskCount+' task(s).'}else{'AutoTask created '+$taskCount+' task(s) with warnings; see the Release Summary.'})
+      ok=$ok
+      phase='AUTOTASK_COMPLETE'
+      wsPath=$wsPath
+      tasksCreated=$taskCount
+      taskData=$taskData.tasks
+      warnings=$allWarnings
+      partUpdates=@($partUpdates)
+      message=$(if($ok){'AutoTask created, CL-linked, labeled and batched '+$taskCount+' task(s).'}else{'AutoTask created '+$taskCount+' task(s) with non-fatal labeling warnings; see the Release Summary.'})
     }
   }catch{
     return [pscustomobject]@{
-      ok=$false;phase=$phase;wsPath=$wsPath;tasksCreated=0;taskData=@();warnings=@($_.Exception.Message)
+      ok=$false
+      phase=$phase
+      wsPath=$wsPath
+      tasksCreated=0
+      taskData=@()
+      warnings=@($_.Exception.Message)
       message=('AutoTask failed at '+$phase+': '+$_.Exception.Message)
     }
-  }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
+  }finally{
+    if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}
+  }
 }
 
 function Invoke-SigmaNestBuild($Request){
@@ -1393,8 +1413,12 @@ function Invoke-SigmaNestBuild($Request){
     SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
     $phase='APPLY_TASK_QUANTITIES'
     SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
-    $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
-    try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
+    $phase='SAVE_WS'
+    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'final')
+    $app.LoadWorkSpaceFile([string]$wsPath)
+    SN-Verify-WorkspaceCLData -app $app -requestParts $Request.parts | Out-Null
+    SN-Verify-TaskCLData -app $app -requestParts $Request.parts | Out-Null
+    try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
     return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.13.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;clLinkFile=[string]$Request.clLinkFile;message=('SigmaNEST WS created with CL-linked part data: '+$wsPath)}
   }catch{
     $checkpointExists=$false
