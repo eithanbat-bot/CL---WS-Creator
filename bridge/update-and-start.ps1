@@ -78,7 +78,11 @@ function Test-CreatorProcessOwner([int]$ProcessId,[string]$ServerPath){
     $cmd=[string]$p.CommandLine
     if([string]::IsNullOrWhiteSpace($cmd)){return $false}
     $full=[IO.Path]::GetFullPath($ServerPath)
-    return ($cmd -match [regex]::Escape($full) -or $cmd -match '(?i)CL---WS-Creator.*\\bridge\\server.ps1')
+    $normCmd=($cmd.Trim('"') -replace '/','\\')
+    $normFull=($full -replace '/','\\').TrimEnd('\\')
+    $exact=$normCmd.IndexOf($normFull,[StringComparison]::OrdinalIgnoreCase) -ge 0
+    $creatorServer=($normCmd -match '(?i)CL---WS-Creator') -and ($normCmd -match '(?i)bridge[\\/]server\.ps1')
+    return ($exact -or $creatorServer)
   }catch{return $false}
 }
 
@@ -339,7 +343,22 @@ if(-not(Test-Path -LiteralPath $Server)){
   exit 1
 }
 
-  Say "Starting bridge $(Get-Version $Server) on http://127.0.0.1:$Port" 'Cyan'
+$finalOwners=@(Get-ListeningPids -Port $Port)
+if($finalOwners.Count -gt 0){
+  $details=@()
+  foreach($id in $finalOwners){
+    try{
+      $p=Get-CimInstance Win32_Process -Filter ("ProcessId="+$id) -ErrorAction Stop
+      $details+=("PID "+$id+": "+([string]$p.CommandLine))
+    }catch{
+      $details+=("PID "+$id)
+    }
+  }
+  throw ("Bridge startup aborted because port "+$Port+" is still occupied. "+($details -join ' | '))
+}
+
+$installedVersion=Get-Version $Server
+  Say "Starting bridge $installedVersion on http://127.0.0.1:$Port" 'Cyan'
 $ps=(Join-Path $PSHOME 'powershell.exe')
 if(-not(Test-Path -LiteralPath $ps)){ $ps=(Get-Command powershell.exe -ErrorAction Stop).Source }
 & $ps -NoProfile -ExecutionPolicy Bypass -STA -File $Server
