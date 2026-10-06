@@ -133,17 +133,19 @@ function Stop-CreatorPortOwners([int]$Port,[string]$ServerPath){
 }
 function Stop-CreatorProcesses([string]$ServerPath){
   try{
-    $serverPattern=[regex]::Escape([IO.Path]::GetFullPath($ServerPath))
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue|
-      Where-Object{
-        $_.ProcessId -ne $PID -and (
-          [string]$_.CommandLine -match $serverPattern -or
-          [string]$_.CommandLine -match 'dxf-indexer\.ps1'
-        )
-      }|
+      Where-Object{$_.ProcessId -ne $PID}|
       ForEach-Object{
-        Say "Stopping existing Creator process PID $($_.ProcessId)..."
-        Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue
+        $creator=$false
+        try{
+          $creator=Test-CreatorProcessOwner -ProcessId ([int]$_.ProcessId) -ServerPath $ServerPath
+        }catch{}
+        $cmd=[string]$_.CommandLine
+        $indexer=($cmd -match '(?i)dxf-indexer\.ps1')
+        if($creator -or $indexer){
+          Say "Stopping existing Creator process PID $($_.ProcessId)..."
+          Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
       }
   }catch{}
   Start-Sleep -Milliseconds 600
