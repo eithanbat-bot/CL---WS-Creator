@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.13.1'
+$BRIDGE_VERSION = '2.13.2'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -788,7 +788,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.12.1'
+    workerVersion='2.13.2'
     pid=$null
     started=$started.ToString('o')
     finished=$null
@@ -1115,7 +1115,7 @@ function Handle-Request($req){
     if($null -eq $b){throw 'Import request body is required.'}
     $workerRequest=[pscustomobject]@{jobId='';statusFile='';mode='IMPORT_ONLY';jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'});outputDir='';selectedSheets=@($b.selectedSheetNames);reportParts=@($b.parts);buildRequest=$b}
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-    return [pscustomobject]@{Status=202;Data=@{accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started;outputDir='';message='Geometry import accepted. SigmaNEST tasks will not be created by this action.'}}
+    return [pscustomobject]@{Status=202;Data=@{accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started;outputDir='';message='Geometry import accepted. CL data will be applied to SigmaNEST PartsList and TasksList, verified, and saved. AutoTask is not run by this action.'}}
   }
   if($req.Path -eq '/api/autotask-label' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
