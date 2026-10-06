@@ -956,6 +956,15 @@ function Prepare-SigmaNestBuild($b){
       Set-Prop -obj $p -name 'prs' -value $(if($sourceType -eq 'PRS'){[string]$f.file}else{''}) | Out-Null
       Set-Prop -obj $p -name 'sourceDxf' -value $(if($sourceType -eq 'DXF'){[string]$f.file}else{[string]$f.sourceDxf}) | Out-Null
       Set-Prop -obj $p -name 'matchType' -value $f.matchType | Out-Null
+      # Carry the exact normalized CL production values into reportParts. The
+      # subsequent AutoTask button reuses these rows, so it cannot fall back
+      # to the PRS metadata after the first import.
+      Set-Prop $p 'sigmaMaterial' (Sigma-Material -cl $clMat -lib $libMat -thickness $clThk) | Out-Null
+      Set-Prop $p 'thicknessMm' (Thickness-Number -s $clThk) | Out-Null
+      Set-Prop $p 'quantityPerVehicle' ([double]$p.qty) | Out-Null
+      Set-Prop $p 'clMaterial' $clMat | Out-Null
+      Set-Prop $p 'clThickness' $clThk | Out-Null
+      try{Set-Prop $p 'clLinkKey' (SN-Make-CLLinkKey -jobName $name -rp $p) | Out-Null}catch{}
       Set-Prop $p 'libraryMaterial' $libMat | Out-Null
       Set-Prop $p 'libraryThickness' $libThk | Out-Null
       Set-Prop $p 'materialOverride' ([bool]($matKnown -and $clMatKnown -and -not $mok)) | Out-Null
