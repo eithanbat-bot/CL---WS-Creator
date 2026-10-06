@@ -546,8 +546,8 @@ function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[
 
 function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
   # Geometry-source rule: match by part/drawing name only.
-  # If any PRS matches at this stage, use the first PRS found.
-  # Only when no PRS exists, use the first DXF found.
+  # When both geometry types exist, the DXF candidate is deliberately preferred.
+  # PRS remains the fallback when no matching DXF candidate exists.
   # PRS never supplies material, thickness, or quantity.
   $n=Normalize -s $part
   $dxf=@()
