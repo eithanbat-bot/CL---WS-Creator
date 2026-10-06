@@ -139,6 +139,8 @@ jobs:
           if([string]::IsNullOrWhiteSpace($indexerVersion) -or [string]::IsNullOrWhiteSpace($requiredVersion)){throw 'Could not read DXF indexer version declarations.'}
           if($indexerVersion -ne $requiredVersion){throw "Server requires DXF indexer $requiredVersion but indexer publishes $indexerVersion."}
 
+          if(-not $updater.Contains('function Test-CreatorProcessOwner')){throw 'Updater is missing verified Creator process ownership detection.'}
+          if(-not $updater.Contains('taskkill.exe /PID')){throw 'Updater is missing the hard-stop fallback for a stuck Creator process.'}
           if(-not $updater.Contains('function Test-Syntax')){throw 'Updater is missing PowerShell syntax validation.'}
           if(-not $updater.Contains('$newFiles')){throw 'Updater rollback does not track newly created runtime files.'}
           if(-not $updater.Contains('dxf-index.json') -or -not $updater.Contains('dxf-index-status.json')){throw 'Updater does not preserve generated DXF index state.'}
