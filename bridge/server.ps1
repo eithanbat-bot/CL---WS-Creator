@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.13.0'
+$BRIDGE_VERSION = '2.13.1'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -509,9 +509,12 @@ function Select-MatchCandidate($candidates,[string]$clMat='',[string]$clThk='',[
   $c=@(Deduplicate-Candidates $candidates)
   if($c.Count -eq 0){return $null}
 
+  # TEST MODE: when both geometry types exist, deliberately prefer DXF.
+  # This lets us isolate whether SigmaNEST accepts the CL material/thickness/
+  # quantity overwrite independently of PRS metadata.
+  $dxf=@($c|Where-Object {[string]$_.fileType -eq 'DXF'})
   $prs=@($c|Where-Object {[string]$_.fileType -eq 'PRS'})
-  $pool=if($prs.Count -gt 0){$prs}else{@($c|Where-Object {[string]$_.fileType -eq 'DXF'})}
-  if($pool.Count -eq 0){$pool=$c}
+  $pool=if($dxf.Count -gt 0){$dxf}elseif($prs.Count -gt 0){$prs}else{$c}
 
   $scored=@($pool|ForEach-Object{
     $score=Candidate-Score -candidate $_ -clMat $clMat -clThk $clThk -matchType $matchType
@@ -611,9 +614,9 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
       $minLen=[math]::Min($target.Length,$cn.Length)
       if($prefix -lt [math]::Ceiling($minLen*0.75)){continue}
       $score=$prefix*10 - [math]::Abs($target.Length-$cn.Length)*3
-      # PRS is geometry-only. Never use PRS material/thickness to choose
-      # between fuzzy candidates. Prefer PRS over DXF only as a geometry source.
-      if([string]$candidate.fileType -eq 'PRS'){$score+=20}
+      # TEST MODE: prefer DXF whenever fuzzy candidates exist in both
+      # formats. PRS remains a fallback only when no DXF candidate exists.
+      if([string]$candidate.fileType -eq 'DXF'){$score+=20}
       $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
     }
     $fuzzy=@($fuzzy|Sort-Object score -Descending)
