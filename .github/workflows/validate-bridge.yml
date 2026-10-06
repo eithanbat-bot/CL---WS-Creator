@@ -148,7 +148,7 @@ jobs:
           if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the raw GitHub self-updater.'}
           if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
           if(-not $com.Contains('function SN-Verify-WorkspaceTaskData')){throw 'SigmaNEST COM runtime does not verify task-level CL data.'}
-          if(-not $com.Contains("$phase='CREATE_TASKS'")){throw 'SigmaNEST COM import path does not create task records.'}
+          if(-not $com.Contains('CreateTasksListForNewPartsInWS')){throw 'SigmaNEST COM import path does not create task records.'}
           if(-not $com.Contains("'BatchQty','BatchQuantity'")){throw 'SigmaNEST COM runtime does not prioritize BatchQty for quantity.'}
           if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
           if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
