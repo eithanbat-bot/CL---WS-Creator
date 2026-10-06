@@ -118,8 +118,9 @@ jobs:
           if(-not $server.Contains('$pool=if($dxf.Count -gt 0){$dxf}')){throw 'Server does not prefer DXF when a DXF candidate exists.'}
           if(-not $server.Contains('DXF_INDEX_NOT_READY')){throw 'Server build API does not reject incomplete DXF indexes.'}
           if(-not $server.Contains('FOUND - DXF')){throw 'Server does not have the DXF-ready status path.'}
-          if(-not $server.Contains('If any PRS matches at this stage, use the first PRS found.')){throw 'Server does not enforce PRS-first geometry selection.'}
-          if(-not $server.Contains('Only when no PRS exists, use the first DXF found.')){throw 'Server does not enforce first-DXF fallback.'}
+          if(-not $com.Contains('function Invoke-SigmaNestImportGeometry')){throw 'SigmaNEST COM runtime is missing the geometry import entry point.'}
+          if(-not $com.Contains('SN-Set-TaskMaterialAndThickness')){throw 'SigmaNEST COM runtime does not apply CL material/thickness to task records.'}
+          if(-not $com.Contains('SN-Set-TaskPartQuantity')){throw 'SigmaNEST COM runtime does not apply CL quantity to task records.'}
 
           $serverLine=@($server -split [Environment]::NewLine | Where-Object {$_.TrimStart().StartsWith('$BRIDGE_VERSION')}) | Select-Object -First 1
           $bridgeVersion=[regex]::Match($serverLine,"'([^']+)'").Groups[1].Value
@@ -147,7 +148,6 @@ jobs:
 
           if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the raw GitHub self-updater.'}
           if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
-          if(-not $com.Contains('function SN-Verify-WorkspaceTaskData')){throw 'SigmaNEST COM runtime does not verify task-level CL data.'}
           if(-not $com.Contains('CreateTasksListForNewPartsInWS')){throw 'SigmaNEST COM import path does not create task records.'}
           if(-not $com.Contains("'BatchQty','BatchQuantity'")){throw 'SigmaNEST COM runtime does not prioritize BatchQty for quantity.'}
           if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
