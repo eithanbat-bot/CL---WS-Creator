@@ -374,7 +374,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
         linkKey=$(if($m.Count){[string]$m[0].linkKey}else{SN-Make-CLLinkKey -jobName $jobName -rp $rp})
         jobName=[string]$jobName;clPart=[string]$rp.part;clMaterial=[string]$rp.material
         sigmaMaterial=[string]$rp.sigmaMaterial;clThickness=[string]$rp.thicknessMm
-        clQuantity=[SN-Scalar-Int]([double]$rp.qty);batchMultiplier=[SN-Scalar-Int]([double]$rp.batchMultiplier)
+        clQuantity=(SN-Scalar-Int -value ([double]$rp.qty) -default 1);batchMultiplier=(SN-Scalar-Int -value ([double]$rp.batchMultiplier) -default 1)
         sourceType=[string]$rp.sourceType;sourcePath=[string]$rp.sourcePath
         sourceSheets=@($rp.sourceSheets);sourceRows=@($rp.sourceRows)
         sigmaNestPartIndex=$(if($m.Count){[int]$m[0].index}else{-1})
@@ -1255,7 +1255,7 @@ function Invoke-SigmaNestBuild($Request){
   try{$name=SN-Normalize-PartIdentity ([string]$taskPart.Name)}catch{}
   try{$drawing=SN-Normalize-PartIdentity ([string]$taskPart.DrawingNumber)}catch{}
   try{$file=SN-Normalize-PartIdentity ([IO.Path]::GetFileNameWithoutExtension([string]$taskPart.PartFilename))}catch{}
-  (($target-and ($name-eq $target-or $drawing-eq $target))-or($source-and($file-eq $source-or $drawing-eq $source)))
+  return (($target -and ($name -eq $target -or $drawing -eq $target)) -or ($source -and ($file -eq $source -or $drawing -eq $source)))
 }
 function SN-Set-TaskMaterialAndThickness($app,$requestParts){
   $taskCount=0
