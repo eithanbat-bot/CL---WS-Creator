@@ -1043,7 +1043,7 @@ function Invoke-SigmaNestImportGeometry($Request){
       if([string]::IsNullOrWhiteSpace($source)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourcePath. Refusing implicit PRS fallback.')}
       $sourceType=([string]$x.sourceType).Trim().ToUpperInvariant()
       if([string]::IsNullOrWhiteSpace($sourceType)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourceType. Expected DXF or PRS.')}
-      [void](SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty}))
+      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType $sourceType -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty})
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
       $created += [pscustomobject]@{part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial;thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN);sourcePath=$source;sourceType=[string]$x.sourceType;importMethod=[string]$load.method;matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1}
