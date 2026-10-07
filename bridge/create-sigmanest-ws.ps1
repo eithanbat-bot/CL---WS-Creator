@@ -99,29 +99,19 @@ function Get-NewPart($app,[int]$beforeCount,[string]$label){
 
 function Add-GeometryToWorkspace($app,[string]$sourcePath,[string]$sourceType){
   if(-not(Test-Path -LiteralPath $sourcePath)){throw ('Geometry not found: '+$sourcePath)}
+  $sourceType=([string]$sourceType).Trim().ToUpperInvariant()
+  $extension=[IO.Path]::GetExtension($sourcePath).ToLowerInvariant()
+  if($sourceType -eq 'DXF' -and $extension -ne '.dxf'){throw ('DXF source type requires a .DXF path: '+$sourcePath)}
+  if($sourceType -eq 'PRS' -and $extension -ne '.prs'){throw ('PRS source type requires a .PRS path: '+$sourcePath)}
+  if($sourceType -notin @('DXF','PRS')){throw ('Unsupported geometry source type "'+$sourceType+'".')}
   $label=[IO.Path]::GetFileName($sourcePath)
   $before=Get-PartsCount $app
   $errors=@()
-
-  # The X1.4 SNApp exposes LoadPart(path). Use it first for both .PRS and .DXF.
-  # On installations where DXF must go through the explicit import interface,
-  # fall back to PartsList.Import(path, ImportID, settings).
-  try{
-    $loaded=Invoke-ComMethod $app 'LoadPart' @([string]$sourcePath)
-    if([bool]$loaded){
-      try{Invoke-ComMethod $app 'CreatePartsListForNewPartsInWS' @()|Out-Null}catch{}
-      return Get-NewPart $app $before $label
-    }
-    $errors += 'LoadPart returned False'
-  }catch{
-    $errors += ('LoadPart: '+$_.Exception.Message)
-  }
 
   if($sourceType -eq 'DXF'){
     try{
       $settings=$null
       try{$settings=New-Object -ComObject SigmaNEST.SNPartImportSettings}catch{}
-
       foreach($importId in @(0,1,2,3)){
         $beforeTry=Get-PartsCount $app
         try{
@@ -129,25 +119,34 @@ function Add-GeometryToWorkspace($app,[string]$sourcePath,[string]$sourceType){
           Start-Sleep -Milliseconds 150
           try{Invoke-ComMethod $app 'CreatePartsListForNewPartsInWS' @()|Out-Null}catch{}
           $afterTry=Get-PartsCount $app
-          if($afterTry -gt $beforeTry){
+          if($afterTry -gt $beforeTry -or ($null -ne $result -and [bool]$result)){
             return Get-NewPart $app $before $label
-          }
-          if($result -ne $null -and [bool]$result){
-            $afterTry=Get-PartsCount $app
-            if($afterTry -gt $beforeTry){return Get-NewPart $app $before $label}
           }
         }catch{
           $errors += ('PartsList.Import id '+$importId+': '+$_.Exception.Message)
         }
       }
     }catch{
-      $errors += ('DXF import fallback: '+$_.Exception.Message)
+      $errors += ('DXF import setup: '+$_.Exception.Message)
     }
+    try{
+      $beforeLoad=Get-PartsCount $app
+      [void](Invoke-ComMethod $app 'LoadPart' @([string]$sourcePath))
+      $afterLoad=Get-PartsCount $app
+      if($afterLoad -gt $beforeLoad){return Get-NewPart $app $before $label}
+    }catch{$errors += ('LoadPart-DXF: '+$_.Exception.Message)}
+    throw ('SigmaNEST could not import selected .DXF "'+$label+'". No PRS fallback was attempted. '+($errors -join ' | '))
   }
 
-  throw ('SigmaNEST could not import "'+$label+'". '+($errors -join ' | '))
+  try{
+    [void](Invoke-ComMethod $app 'LoadPart' @([string]$sourcePath))
+    Start-Sleep -Milliseconds 100
+    return Get-NewPart $app $before $label
+  }catch{
+    $errors += ('LoadPart-PRS: '+$_.Exception.Message)
+  }
+  throw ('SigmaNEST could not import selected .PRS "'+$label+'". '+($errors -join ' | '))
 }
-
 try{
   $phase='READ_REQUEST'
   $req=Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8|ConvertFrom-Json
@@ -204,10 +203,12 @@ try{
     $sourcePath=[string]$x.sourcePath
     $sourceType=[string]$x.sourceType
     if([string]::IsNullOrWhiteSpace($sourcePath)){
-      $sourcePath=[string]$x.prsPath
-      if(-not $sourceType){$sourceType='PRS'}
+      throw ('Request part "'+[string]$x.part+'" has no explicit sourcePath. Refusing implicit PRS fallback.')
     }
-    if([string]::IsNullOrWhiteSpace($sourcePath)){continue}
+    $sourceType=([string]$sourceType).Trim().ToUpperInvariant()
+    if([string]::IsNullOrWhiteSpace($sourceType)){
+      throw ('Request part "'+[string]$x.part+'" has no explicit sourceType. Expected DXF or PRS.')
+    }
 
     $part=Add-GeometryToWorkspace $app $sourcePath $sourceType
 
