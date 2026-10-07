@@ -751,36 +751,68 @@ function SN-Try-ImportPRS-WithSettings($app,[string]$sourcePath,$clData){
   return [pscustomobject]@{ok=$false;diagnostics=$diagnostics}
 }
 function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=$null){
+  if([string]::IsNullOrWhiteSpace($sourcePath)){throw 'SigmaNEST geometry sourcePath is required; refusing implicit PRS fallback.'}
+  $sourceType=([string]$sourceType).Trim().ToUpperInvariant()
+  $extension=[IO.Path]::GetExtension($sourcePath).ToLowerInvariant()
+  if($sourceType -eq 'DXF' -and $extension -ne '.dxf'){throw ('Geometry source type is DXF but the selected file is not a .DXF: '+$sourcePath)}
+  if($sourceType -eq 'PRS' -and $extension -ne '.prs'){throw ('Geometry source type is PRS but the selected file is not a .PRS: '+$sourcePath)}
+  if($sourceType -notin @('DXF','PRS')){throw ('Unsupported geometry source type "'+$sourceType+'". Expected DXF or PRS.')}
   if(-not(Test-Path -LiteralPath $sourcePath)){throw ('Geometry not found: '+$sourcePath)}
   $label=[IO.Path]::GetFileName($sourcePath)
   $errors=@()
-  try{
-    [void]$app.LoadPart([string]$sourcePath)
-    return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType=$sourceType;method=('LoadPart-'+$sourceType+'-GEOMETRY')}
-  }catch{
-    $errors+=('LoadPart: '+(SN-ErrorText $_))
-  }
 
   if($sourceType -eq 'DXF'){
+    # Explicit DXF import first. The source is the exact .DXF path chosen by the
+    # library matcher; SigmaNEST is never allowed to resolve a PRS by name.
     try{
       $settings=$null
       try{$settings=New-Object -ComObject SigmaNEST.SNPartImportSettings}catch{}
       foreach($importId in @(0,1,2,3)){
         try{
-          [void](SN-Invoke-ComMethod $app.PartsList 'Import' @([string]$sourcePath,[int]$importId,$settings))
-          return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType=$sourceType;method=('PartsList.Import '+$importId)}
+          $before=SN-Parts-Count $app
+          $result=SN-Invoke-ComMethod $app.PartsList 'Import' @([string]$sourcePath,[int]$importId,$settings)
+          Start-Sleep -Milliseconds 150
+          $after=SN-Parts-Count $app
+          if($after -gt $before -or ($null -ne $result -and [bool]$result)){
+            return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method=('PartsList.Import '+$importId+'-DXF')}
+          }
         }catch{
           $errors+=('PartsList.Import '+$importId+': '+(SN-ErrorText $_))
         }
       }
     }catch{
-      $errors+=('DXF import fallback: '+(SN-ErrorText $_))
+      $errors+=('DXF PartsList.Import setup: '+(SN-ErrorText $_))
     }
+
+    # Some X1.4 installations accept a DXF through LoadPart. This remains safe
+    # because the exact .DXF path is used and PRS fallback is forbidden.
+    try{
+      $before=SN-Parts-Count $app
+      [void]$app.LoadPart([string]$sourcePath)
+      $after=SN-Parts-Count $app
+      if($after -gt $before){
+        return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='LoadPart-DXF-GEOMETRY'}
+      }
+      $errors+='LoadPart-DXF returned without adding a PartsList entry'
+    }catch{
+      $errors+=('LoadPart-DXF: '+(SN-ErrorText $_))
+    }
+    throw ('SigmaNEST could not load the selected .DXF "'+$label+'". No PRS fallback was attempted. '+($errors -join ' | '))
   }
 
-  throw ('SigmaNEST could not load "'+$label+'" as geometry. '+($errors -join ' | '))
+  # PRS is an explicit fallback only when the matcher selected a PRS source.
+  try{
+    $before=SN-Parts-Count $app
+    [void]$app.LoadPart([string]$sourcePath)
+    $after=SN-Parts-Count $app
+    if($after -gt $before){
+      return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='PRS';method='LoadPart-PRS-GEOMETRY'}
+    }
+    throw ('LoadPart-PRS returned without adding a PartsList entry for "'+$label+'".')
+  }catch{
+    throw ('SigmaNEST could not load the selected .PRS "'+$label+'". '+(SN-ErrorText $_))
+  }
 }
-
 function SN-Set-TaskMaterialAndThickness($app,$requestParts){
   $taskCount=0
   try{$taskCount=[int]$app.TasksList.Count}catch{}
@@ -926,7 +958,9 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
 
         $set=$null
         $readBack=$null
-        foreach($propertyName in @('Quantity','Qty','QtyRequired','QtyReq','BatchQty')){
+        # BatchQty is the CL quantity per vehicle; do not let a generic task Quantity field
+        # reinterpret the CL quantity as a batch-multiplied value.
+        foreach($propertyName in @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','Quantity','Qty','QtyRequired','QtyReq')){
           try{
             $taskPart.$propertyName=$quantity
             $readBack=[double]$taskPart.$propertyName
@@ -1006,8 +1040,9 @@ function Invoke-SigmaNestImportGeometry($Request){
     $queued=@()
     foreach($x in @($Request.parts)){
       $source=[string]$x.sourcePath
-      if([string]::IsNullOrWhiteSpace($source)){$source=[string]$x.prsPath}
-      if([string]::IsNullOrWhiteSpace($source)){continue}
+      if([string]::IsNullOrWhiteSpace($source)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourcePath. Refusing implicit PRS fallback.')}
+      $sourceType=([string]$x.sourceType).Trim().ToUpperInvariant()
+      if([string]::IsNullOrWhiteSpace($sourceType)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourceType. Expected DXF or PRS.')}
       [void](SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty}))
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
@@ -1204,9 +1239,9 @@ function Invoke-SigmaNestBuild($Request){
     $phase='IMPORT_PARTS';$created=@();$queued=@()
     $beforeParts=SN-Parts-Count $app
     foreach($x in @($Request.parts)){
-      $sourcePath=[string]$x.sourcePath;$sourceType=[string]$x.sourceType
-      if([string]::IsNullOrWhiteSpace($sourcePath)){$sourcePath=[string]$x.prsPath;if(-not $sourceType){$sourceType='PRS'}}
-      if([string]::IsNullOrWhiteSpace($sourcePath)){continue}
+      $sourcePath=[string]$x.sourcePath;$sourceType=([string]$x.sourceType).Trim().ToUpperInvariant()
+      if([string]::IsNullOrWhiteSpace($sourcePath)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourcePath. Refusing implicit PRS fallback.')}
+      if([string]::IsNullOrWhiteSpace($sourceType)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourceType. Expected DXF or PRS.')}
 
       $load=SN-Queue-Geometry -app $app -sourcePath $sourcePath -sourceType $sourceType
       $quantity=SN-Scalar-Int -value $x.qty -default 1;if($quantity -lt 1){$quantity=1}
