@@ -1046,7 +1046,7 @@ function Invoke-SigmaNestImportGeometry($Request){
       [void](SN-Queue-Geometry -app $app -sourcePath $source -sourceType ([string]$x.sourceType) -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty}))
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
-      $created += [pscustomobject]@{part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial;thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN);sourcePath=$source;sourceType=[string]$x.sourceType;matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1}
+      $created += [pscustomobject]@{part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial;thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN);sourcePath=$source;sourceType=[string]$x.sourceType;importMethod=[string]$load.method;matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1}
       $queued += [pscustomobject]@{part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=[string]$x.sourceType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1;sourceSheets=@($x.sourceSheets);sourceRows=@($x.sourceRows)}
     }
     if($queued.Count -eq 0){throw 'No geometry was found to import.'}
@@ -1191,7 +1191,7 @@ function Invoke-SigmaNestAutoTask($Request){
     $phase='LOAD_WORKSPACE'
     $app.LoadWorkSpaceFile([string]$wsPath)
     $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName $jobName
+    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName ([string]$Request.jobName)
     $phase='AUTO_TASK'
     $app.AutoTask()
     Start-Sleep -Milliseconds 500
@@ -1258,6 +1258,7 @@ function Invoke-SigmaNestBuild($Request){
         qty=$quantity
         material=$material
         thickness=$thicknessText
+        importMethod=[string]$load.method
         quantityProperty='TASK_PART_PENDING'
         materialProperty='TASK_PENDING'
         thicknessProperty='TASK_PENDING'
@@ -1321,13 +1322,13 @@ function Invoke-SigmaNestBuild($Request){
     SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
     try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
-    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.13.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
+    return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.14.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
   }catch{
     $checkpointExists=$false
     try{$checkpointExists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
     return [pscustomobject]@{
       ok=$false
-      creatorVersion='DIRECT-COM-1.8'
+      creatorVersion='DIRECT-COM-2.14.0'
       phase=$phase
       error=$_.Exception.Message
       category=$_.CategoryInfo.ToString()
