@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.13.2'
+$BRIDGE_VERSION = '2.14.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -619,7 +619,12 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
       if([string]$candidate.fileType -eq 'DXF'){$score+=20}
       $fuzzy += [pscustomobject]@{candidate=$candidate;score=$score;prefix=$prefix}
     }
-    $fuzzy=@($fuzzy|Sort-Object score -Descending)
+    # Hard source policy: when any DXF fuzzy candidate exists, PRS fuzzy candidates
+    # are not eligible. DXF is the preferred geometry source, with PRS only as fallback.
+    $dxfFuzzy=@($fuzzy|Where-Object {[string]$_.candidate.fileType -eq 'DXF'})
+    $prsFuzzy=@($fuzzy|Where-Object {[string]$_.candidate.fileType -eq 'PRS'})
+    $fuzzy=if($dxfFuzzy.Count -gt 0){$dxfFuzzy}elseif($prsFuzzy.Count -gt 0){$prsFuzzy}else{@()}
+    $fuzzy=@($fuzzy|Sort-Object @{Expression={[int]$_.score};Descending=$true},@{Expression={[string]$_.candidate.file};Descending=$false})
     if($fuzzy.Count){
       $top=$fuzzy[0]
       $second=if($fuzzy.Count -gt 1){$fuzzy[1]}else{$null}
@@ -1044,9 +1049,11 @@ function Prepare-SigmaNestBuild($b){
           taskBatches=@($_.taskBatches)
           taskSheet=$_.sheet
           sourcePath=$_.sourcePath
-          sourceType=$_.sourceType
-          prsPath=$(if($_.sourceType -eq 'PRS'){[string]$_.sourcePath}else{''})
-          geometryOnly=$([bool]($_.sourceType -eq 'PRS'))
+          sourceType=([string]$_.sourceType).Trim().ToUpperInvariant()
+          # Legacy field retained only for true PRS fallback records. DXF records
+          # never carry a PRS path into the SigmaNEST worker.
+          prsPath=$(if(([string]$_.sourceType).Trim().ToUpperInvariant() -eq 'PRS'){[string]$_.sourcePath}else{''})
+          geometryOnly=$false
           sigmaMaterial=(Sigma-Material -cl ([string]$_.material) -lib ([string]$_.libraryMaterial) -thickness ([string]$_.thickness))
           thicknessMm=(Thickness-Number -s ([string]$_.thickness))
         }
