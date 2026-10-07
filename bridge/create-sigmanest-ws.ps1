@@ -130,10 +130,9 @@ function Add-GeometryToWorkspace($app,[string]$sourcePath,[string]$sourceType){
       $errors += ('DXF import setup: '+$_.Exception.Message)
     }
     try{
-      $beforeLoad=Get-PartsCount $app
       [void](Invoke-ComMethod $app 'LoadPart' @([string]$sourcePath))
-      $afterLoad=Get-PartsCount $app
-      if($afterLoad -gt $beforeLoad){return Get-NewPart $app $before $label}
+      try{Invoke-ComMethod $app 'CreatePartsListForNewPartsInWS' @()|Out-Null}catch{}
+      return Get-NewPart $app $before $label
     }catch{$errors += ('LoadPart-DXF: '+$_.Exception.Message)}
     throw ('SigmaNEST could not import selected .DXF "'+$label+'". No PRS fallback was attempted. '+($errors -join ' | '))
   }
@@ -141,6 +140,7 @@ function Add-GeometryToWorkspace($app,[string]$sourcePath,[string]$sourceType){
   try{
     [void](Invoke-ComMethod $app 'LoadPart' @([string]$sourcePath))
     Start-Sleep -Milliseconds 100
+    try{Invoke-ComMethod $app 'CreatePartsListForNewPartsInWS' @()|Out-Null}catch{}
     return Get-NewPart $app $before $label
   }catch{
     $errors += ('LoadPart-PRS: '+$_.Exception.Message)
