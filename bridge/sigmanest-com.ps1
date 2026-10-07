@@ -787,13 +787,10 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=
     # Some X1.4 installations accept a DXF through LoadPart. This remains safe
     # because the exact .DXF path is used and PRS fallback is forbidden.
     try{
-      $before=SN-Parts-Count $app
+      # LoadPart may queue the geometry until CreatePartsListForNewPartsInWS;
+      # the caller performs that commit and verifies the final PartsList count.
       [void]$app.LoadPart([string]$sourcePath)
-      $after=SN-Parts-Count $app
-      if($after -gt $before){
-        return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='LoadPart-DXF-GEOMETRY'}
-      }
-      $errors+='LoadPart-DXF returned without adding a PartsList entry'
+      return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='LoadPart-DXF-GEOMETRY'}
     }catch{
       $errors+=('LoadPart-DXF: '+(SN-ErrorText $_))
     }
@@ -802,13 +799,10 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=
 
   # PRS is an explicit fallback only when the matcher selected a PRS source.
   try{
-    $before=SN-Parts-Count $app
+    # LoadPart may queue the PRS geometry until CreatePartsListForNewPartsInWS;
+    # the caller commits it and verifies the resulting PartsList entry.
     [void]$app.LoadPart([string]$sourcePath)
-    $after=SN-Parts-Count $app
-    if($after -gt $before){
-      return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='PRS';method='LoadPart-PRS-GEOMETRY'}
-    }
-    throw ('LoadPart-PRS returned without adding a PartsList entry for "'+$label+'".')
+    return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='PRS';method='LoadPart-PRS-GEOMETRY'}
   }catch{
     throw ('SigmaNEST could not load the selected .PRS "'+$label+'". '+(SN-ErrorText $_))
   }
