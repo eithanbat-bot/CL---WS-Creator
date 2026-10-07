@@ -890,7 +890,12 @@ function Prepare-SigmaNestBuild($b){
       $selectionAmbiguous=[bool]$(if($f.selectionAmbiguous){$f.selectionAmbiguous}else{$false})
       $selectionFuzzy=[bool]$(if($f.selectionFuzzy){$f.selectionFuzzy}else{$false})
 
-      $sourceType=[string]$f.fileType
+      $sourceType=([string]$f.fileType).Trim().ToUpperInvariant()
+      $sourcePath=[IO.Path]::GetFullPath([string]$f.file)
+      $extension=[IO.Path]::GetExtension($sourcePath).ToLowerInvariant()
+      if($sourceType -eq 'DXF' -and $extension -ne '.dxf'){throw ('DXF candidate resolved to a non-DXF file: '+$sourcePath)}
+      if($sourceType -eq 'PRS' -and $extension -ne '.prs'){throw ('PRS candidate resolved to a non-PRS file: '+$sourcePath)}
+      if($sourceType -notin @('DXF','PRS')){throw ('Geometry matcher returned unsupported source type: '+$sourceType)}
       # PRS metadata is intentionally excluded from production decisions.
       $libMat=''
       $libThk=''
@@ -958,7 +963,7 @@ function Prepare-SigmaNestBuild($b){
       Set-Prop -obj $p -name 'status' -value $status | Out-Null
       Set-Prop -obj $p -name 'statusLabel' -value $label | Out-Null
       Set-Prop -obj $p -name 'reviewReason' -value $reviewReason | Out-Null
-      Set-Prop -obj $p -name 'sourcePath' -value ([string]$f.file) | Out-Null
+      Set-Prop -obj $p -name 'sourcePath' -value $sourcePath | Out-Null
       Set-Prop -obj $p -name 'sourceType' -value $sourceType | Out-Null
       Set-Prop -obj $p -name 'file' -value ([string]$f.file) | Out-Null
       Set-Prop -obj $p -name 'prs' -value $(if($sourceType -eq 'PRS'){[string]$f.file}else{''}) | Out-Null
