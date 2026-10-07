@@ -110,7 +110,7 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
     ['Batch values applied',tasks.filter(function(x){return x.batchApplied}).length,'Task labels applied',tasks.filter(function(x){return x.labelApplied}).length],
     ['','','',''],
     ['HAND-OFF','DETAIL','',''],
-    ['Geometry source','DXF preferred in the current test build; PRS is fallback.','',''],
+    ['Geometry source','DXF-FIRST: matching .DXF is selected whenever found; .PRS is fallback only when no matching DXF exists.','',''],
     ['CL overrides','Material, thickness and quantity are written to the SigmaNEST PartsList and TasksList, then verified after save.','',''],
     ['Workspace',result.wsPath||currentWsPath||'Not available','',''],
     ['Warnings',warnings.join(' | '),'','']
