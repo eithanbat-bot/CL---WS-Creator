@@ -249,6 +249,15 @@ function SN-Set-PartFieldDiscovered($partObj,[string[]]$aliases,$value,[string]$
   }
   return $null
 }
+function SN-Set-QtyToNest($partObj,[int]$qty){
+  if($null -eq $partObj){return $null}
+  try{
+    $partObj.QtyToNest=$qty
+    $back=SN-Scalar-Int -value $partObj.QtyToNest -default -2147483648
+    if($back -eq $qty){return 'QtyToNest'}
+  }catch{}
+  return $null
+}
 function SN-Set-PartField($partObj,[string[]]$names,$value,[string]$expectedText='',$expectedNumber=([double]::NaN),$expectedInt=-2147483648){
   $set=SN-Try-SetField -obj $partObj -names $names -value $value -expectedText $expectedText -expectedNumber $expectedNumber -expectedInt $expectedInt
   if($set){return [pscustomobject]@{path=$set;object=$partObj}}
@@ -389,7 +398,8 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
     # SigmaNEST's Part Parameters dialog calls the production quantity "Number To Nest".
     # Prefer that canonical field and other nest-quantity aliases. BatchQty is last because
     # SigmaNEST uses it in task/batch context and it must not override the part quantity.
-    $setInfo=SN-Set-PartField -partObj $partObj -names @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','BatchQuantity','BatchQty') -value $qty -expectedInt $qty
+    $setQty=SN-Set-QtyToNest -partObj $partObj -qty $qty
+    $setInfo=if($setQty){[pscustomobject]@{path=$setQty;object=$partObj}}else{SN-Set-PartField -partObj $partObj -names @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','BatchQuantity','BatchQty') -value $qty -expectedInt $qty}
     if(-not $setInfo){
       throw ('CL quantity '+$qty+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
     }
@@ -941,11 +951,12 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
         if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
         if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
 
-        $set=$null
+        $set=SN-Set-QtyToNest -partObj $taskPart -qty $quantity
         $readBack=$null
-        # Part Parameters quantity is the CL quantity. Prefer the explicit Number To Nest
-        # fields used by the SigmaNEST part record; BatchQty is only a final fallback.
-        foreach($propertyName in @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','BatchQuantity','BatchQty')){
+        # QtyToNest is the actual SigmaNEST COM field behind the Part Parameters
+        # "Number To Nest" value. Only fall back to generic aliases if direct COM
+        # access is unavailable.
+        if(-not $set){ foreach($propertyName in @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','BatchQuantity','BatchQty')){
           try{
             $taskPart.$propertyName=$quantity
             $readBack=SN-Scalar-Number -value $taskPart.$propertyName -default [double]::NaN
@@ -954,7 +965,7 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
               break
             }
           }catch{}
-        }
+        } }
 
         if(-not $set){
           throw ('SigmaNEST task part "'+$taskPartName+'" does not expose a writable quantity property. Task index='+$ti+'.')
