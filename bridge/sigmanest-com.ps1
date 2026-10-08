@@ -1214,6 +1214,7 @@ function Invoke-SigmaNestAutoTask($Request){
     return [pscustomobject]@{
       ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
       partCount=(SN-Parts-Count $app);importedCount=(SN-Parts-Count $app)
+      parts=@($Request.parts)
       taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@($partUpdates)
       message=$(if($ok){'AutoTask created, labeled and batched '+$taskCount+' task(s).'}else{'AutoTask created '+$taskCount+' task(s) with warnings; see the Release Summary.'})
     }
