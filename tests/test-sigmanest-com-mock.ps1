@@ -74,7 +74,7 @@ $taskResult=SN-Set-TaskNameAndBatch -app $taskApp -requestParts @($taskRequest)
 Assert ($taskPart.Material -eq 'MS') ("Task material was not MS; got $($taskPart.Material).")
 Assert ([double]$taskPart.Thickness -eq 8.0) ("Task thickness was not 8mm; got $($taskPart.Thickness).")
 Assert ([double]$taskPart.NumberToNest -eq 4) ("Task quantity was not 4; got $($taskPart.NumberToNest).")
-Assert ([double]$taskPart.BatchQty -eq 99) ("Task BatchQty was incorrectly changed; got $($taskPart.BatchQty).")
+Assert ([double]$taskPart.BatchQty -eq 2) ("Task batch multiplier was not applied as 2; got $($taskPart.BatchQty).")
 Assert ($taskResult.tasks.Count -eq 1) 'Task result did not contain exactly one task.'
 Assert ($taskResult.tasks[0].labelApplied) 'Task label was not applied in the COM simulation.'
 Assert ($taskResult.tasks[0].batchApplied) 'Task batch was not applied in the COM simulation.'
