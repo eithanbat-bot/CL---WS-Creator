@@ -8,8 +8,8 @@ $taskpane=Get-Content -Raw (Join-Path $Root 'taskpane.js')
 
 function Assert([bool]$condition,[string]$message){if(-not $condition){throw $message}}
 
-$serverVersion=[regex]::Match(($server -split [Environment]::NewLine | ? {$_.TrimStart().StartsWith('$BRIDGE_VERSION')} | Select-Object -First 1),"'([^']+)'").Groups[1].Value
-$workerVersion=[regex]::Match(($worker -split [Environment]::NewLine | ? {$_.TrimStart().StartsWith('$WorkerVersion')} | Select-Object -First 1),"'([^']+)'").Groups[1].Value
+$serverVersion=[regex]::Match($server,"(?m)^\s*\$BRIDGE_VERSION\s*=\s*'([^']+)'").Groups[1].Value
+$workerVersion=[regex]::Match($worker,"(?m)^\s*\$WorkerVersion\s*=\s*'([^']+)'").Groups[1].Value
 Assert ($serverVersion -eq $workerVersion) "Bridge/worker version mismatch: $serverVersion vs $workerVersion"
 Assert ($serverVersion -eq '2.19.0') "Unexpected bridge version: $serverVersion"
 
