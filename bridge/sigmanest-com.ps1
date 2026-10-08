@@ -111,9 +111,11 @@ function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',$
       if($expectedText -ne ''){
         if(([string]$obj.$name).Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $name}
       }elseif(-not [double]::IsNaN($expectedNumber)){
-        if(([double]$obj.$name) -eq $expectedNumber){return $name}
+        $back=SN-Scalar-Number -value $obj.$name -default ([double]::NaN)
+        if(-not [double]::IsNaN([double]$back) -and $back -eq $expectedNumber){return $name}
       }elseif($expectedInt -ne -2147483648){
-        if(([int]$obj.$name) -eq $expectedInt){return $name}
+        $back=SN-Scalar-Int -value $obj.$name -default -2147483648
+        if($back -eq $expectedInt){return $name}
       }else{return $name}
     }catch{}
     try{
@@ -122,9 +124,15 @@ function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',$
         $back=[string]$obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())
         if($back.Trim().Equals($expectedText.Trim(),[StringComparison]::OrdinalIgnoreCase)){return $name}
       }elseif(-not [double]::IsNaN($expectedNumber)){
-        try{if(([double]$obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())) -eq $expectedNumber){return $name}}catch{}
+        try{
+          $back=SN-Scalar-Number -value $obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@()) -default ([double]::NaN)
+          if(-not [double]::IsNaN([double]$back) -and $back -eq $expectedNumber){return $name}
+        }catch{}
       }elseif($expectedInt -ne -2147483648){
-        try{if(([int]$obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@())) -eq $expectedInt){return $name}}catch{}
+        try{
+          $back=SN-Scalar-Int -value $obj.GetType().InvokeMember($name,[Reflection.BindingFlags]::GetProperty,$null,$obj,@()) -default -2147483648
+          if($back -eq $expectedInt){return $name}
+        }catch{}
       }else{return $name}
     }catch{}
   }
@@ -378,7 +386,10 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
       $row.thicknessProperty=[string]$setInfo.path
     }
 
-    $setInfo=SN-Set-PartField -partObj $partObj -names @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -value $qty -expectedInt $qty
+    # SigmaNEST's Part Parameters dialog calls the production quantity "Number To Nest".
+    # Prefer that canonical field and other nest-quantity aliases. BatchQty is last because
+    # SigmaNEST uses it in task/batch context and it must not override the part quantity.
+    $setInfo=SN-Set-PartField -partObj $partObj -names @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','BatchQuantity','BatchQty') -value $qty -expectedInt $qty
     if(-not $setInfo){
       throw ('CL quantity '+$qty+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
     }
@@ -490,7 +501,8 @@ function SN-Verify-WorkspaceCLData($app,$requestParts){
     }
     $qty=SN-Scalar-Int -value $rp.qty -default 1
     if($qty -lt 1){$qty=1}
-    $q=SN-Read-PartField -partObj $found.part -aliases @('QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
+    # Verify the actual Part Parameters quantity field, not a task-only batch field.
+    $q=SN-Read-PartField -partObj $found.part -aliases @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
     if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
   }
   return $true
