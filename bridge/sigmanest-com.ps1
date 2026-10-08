@@ -344,7 +344,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
     if(-not (SN-Verify-PartIdentity -partObj $found.part -targetName $targetName -sourcePath $sourcePath)){
       throw ('SigmaNEST workspace identity verification failed for CL part "'+$targetName+'". Refusing to overwrite another part.')
     }
-    $usedIndices += [int]$found.index
+    $usedIndices += (SN-Scalar-Int -value $found.index -default -1)
     $partObj=$found.part
     $qty=SN-Scalar-Int -value $rp.qty -default 1
     if($qty -lt 1){$qty=1}
@@ -352,7 +352,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
     $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
     $row=[ordered]@{
       part=$targetName
-      index=[int]$found.index
+      index=(SN-Scalar-Int -value $found.index -default -1)
       qty=$qty
       material=$material
       thickness=$thickness
@@ -407,7 +407,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
         sourcePath=[string]$rp.sourcePath
         sourceSheets=@($rp.sourceSheets)
         sourceRows=@($rp.sourceRows)
-        sigmaNestPartIndex=$(if($m.Count){[int]$m[0].index}else{-1})
+        sigmaNestPartIndex=$(if($m.Count){SN-Scalar-Int -value $m[0].index -default -1}else{-1})
       }
     }
     try{
@@ -1037,7 +1037,7 @@ function Invoke-SigmaNestImportGeometry($Request){
     [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import')
     $phase='RELOAD_AND_VERIFY_PART_DATA'
     $app.LoadWorkSpaceFile([string]$wsPath)
-    $partCountAfterReload=SN-Parts-Count $app
+    $partCountAfterReload=SN-Scalar-Int -value (SN-Parts-Count $app) -default 0
     if($partCountAfterReload -lt $queued.Count){
       throw ('SigmaNEST reload lost imported geometry: '+$partCountAfterReload+' part(s) remain, '+$queued.Count+' were expected.')
     }
@@ -1073,7 +1073,7 @@ function Invoke-SigmaNestImportGeometry($Request){
   }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
 }
 function SN-Set-TaskNameAndBatch($app,$requestParts){
-  $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
+  $taskCount=0;try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
   $map=@{};foreach($rp in @($requestParts)){$map[[string]$rp.part]=$rp}
   $results=@();$warnings=@()
   for($ti=0;$ti -lt $taskCount;$ti++){
