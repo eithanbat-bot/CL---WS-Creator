@@ -1047,13 +1047,20 @@ function Invoke-SigmaNestImportGeometry($Request){
     # imported PartsList data before any task is generated.
     $phase='SAVE_WORKSPACE'
     [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import')
-    $phase='RELOAD_AND_VERIFY_PART_DATA'
-    $app.LoadWorkSpaceFile([string]$wsPath)
-    $partCountAfterReload=SN-Scalar-Int -value (SN-Parts-Count $app) -default 0
-    if($partCountAfterReload -lt $queued.Count){
-      throw ('SigmaNEST reload lost imported geometry: '+$partCountAfterReload+' part(s) remain, '+$queued.Count+' were expected.')
-    }
+    # Do not reload the saved workspace through SNApp here. SigmaNEST.SNApp
+    # attaches to the active SigmaNEST UI, and a background LoadWorkSpaceFile
+    # can disturb the operator's active workspace/Part Parameters dialog.
+    # The imported PartsList was already verified before save; after save we only
+    # verify that the .ws file exists and is non-empty.
     $phase='VERIFY_SAVED_CL_PART_DATA'
+    if(-not (Test-Path -LiteralPath $wsPath)){
+      throw ('SigmaNEST reported a successful save but the workspace file was not created: '+$wsPath)
+    }
+    try{
+      if((Get-Item -LiteralPath $wsPath).Length -le 0){
+        throw ('SigmaNEST created an empty workspace file: '+$wsPath)
+      }
+    }catch{throw ('Saved workspace verification failed: '+$_.Exception.Message)}
     # Verification returns a boolean. Suppress it so this function emits exactly
     # one result object; otherwise PowerShell combines the boolean and result
     # object into System.Object[], which breaks the worker's Int32 conversions.
