@@ -1182,11 +1182,27 @@ function Invoke-SigmaNestAutoTask($Request){
     $app.LoadWorkSpaceFile([string]$wsPath)
     $phase='APPLY_CL_PART_DATA'
     $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName ([string]$Request.jobName)
+
+    # An imported workspace contains PartsList entries but not necessarily the
+    # task objects that SigmaNEST AutoTask expects. Build the TasksList from the
+    # imported workspace first, then let AutoTask organize/nest those tasks.
+    $phase='CREATE_TASKS_FOR_IMPORTED_PARTS'
+    $app.CreateTasksListForNewPartsInWS()
+    Start-Sleep -Milliseconds 300
+    $taskCountBefore=0
+    try{$taskCountBefore=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
+    if($taskCountBefore -le 0){
+      throw 'SigmaNEST could not create TasksList entries from the imported workspace parts.'
+    }
+
     $phase='AUTO_TASK'
     $app.AutoTask()
-    Start-Sleep -Milliseconds 500
-    $taskCount=0;try{$taskCount=[int]$app.TasksList.Count}catch{}
-    if($taskCount -le 0){throw 'SigmaNEST AutoTask completed but created no tasks.'}
+    Start-Sleep -Milliseconds 1000
+    $taskCount=0
+    try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
+    if($taskCount -le 0){
+      throw 'SigmaNEST AutoTask completed but no TasksList entries are present.'
+    }
     $phase='APPLY_TASK_CL_DATA'
     SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
     SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
@@ -1197,12 +1213,16 @@ function Invoke-SigmaNestAutoTask($Request){
     $ok=($taskData.warnings.Count -eq 0)
     return [pscustomobject]@{
       ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
+      partCount=(SN-Parts-Count $app);importedCount=(SN-Parts-Count $app)
       taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@($partUpdates)
       message=$(if($ok){'AutoTask created, labeled and batched '+$taskCount+' task(s).'}else{'AutoTask created '+$taskCount+' task(s) with warnings; see the Release Summary.'})
     }
   }catch{
     return [pscustomobject]@{
-      ok=$false;phase=$phase;wsPath=$wsPath;tasksCreated=0;taskData=@();warnings=@($_.Exception.Message)
+      ok=$false;phase=$phase;wsPath=$wsPath;tasksCreated=0
+      partCount=$(try{SN-Parts-Count $app}catch{0})
+      importedCount=$(try{SN-Parts-Count $app}catch{0})
+      taskData=@();warnings=@($_.Exception.Message)
       message=('AutoTask failed at '+$phase+': '+$_.Exception.Message)
     }
   }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
