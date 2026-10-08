@@ -249,8 +249,10 @@ try{
   foreach($entry in $entries){
     $validationStage=Join-Path $tmpRoot ('validate-'+$entry.relative)
     Copy-Item -LiteralPath $entry.source -Destination $validationStage -Force
+    $entry | Add-Member -MemberType NoteProperty -Name ValidatedStage -Value $validationStage -Force
     $ext=[IO.Path]::GetExtension($entry.relative).ToLowerInvariant()
     Say "Verifying bridge\\$($entry.relative)..."
+    if(-not(Test-Path -LiteralPath $entry.source)){throw "Downloaded bridge source disappeared before validation: $($entry.relative)"}
     if(-not(Test-Path -LiteralPath $validationStage)){throw "Downloaded bridge file did not materialize for validation: $($entry.relative)"}
     if($ext -eq '.ps1' -and -not(Test-Syntax $validationStage)){throw "Downloaded $($entry.relative) failed PowerShell syntax validation."}
     if($ext -eq '.xml' -and -not(Test-Xml $validationStage)){throw "Downloaded $($entry.relative) failed XML validation."}
@@ -265,7 +267,7 @@ try{
   $install=@()
   foreach($entry in $entries){
     $local=Join-Path $BridgeDir $entry.relative
-    $stage=[string]$entry.source
+    $stage=[string]$entry.ValidatedStage
     if((Get-Hash $stage) -ne (Get-Hash $local)){
       $install+=[pscustomobject]@{Stage=[string]$entry.source;Local=$local;Relative=$entry.relative}
     }
