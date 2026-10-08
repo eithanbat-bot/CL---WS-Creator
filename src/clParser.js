@@ -51,9 +51,13 @@
     const rows=[];
     for(let i=located.row+1;i<matrix.length;i++){
       const r=matrix[i]||[], part=clean(r[partIdx]); if(!part)continue;
-      const material=normalizeMaterial(r[matIdx]); let qty=qtyIdx>=0?toNumber(r[qtyIdx]):NaN;
+      const material=normalizeMaterial(r[matIdx]);
+      const rawQty=qtyIdx>=0?toNumber(r[qtyIdx]):NaN;
       const qpu=qpuIdx>=0?toNumber(r[qpuIdx]):NaN;
-      if(!Number.isFinite(qty)&&Number.isFinite(qpu))qty=qpu;
+      // The CL quantity imported into SigmaNEST is always the quantity for ONE
+      // vehicle. When the sheet explicitly provides Qty/Vehicle, that field is
+      // authoritative; a separate Qty column may represent a batch/kit total.
+      const qty=Number.isFinite(qpu)?qpu:rawQty;
       const thickness=clean(r[thkIdx])||thicknessFromMaterial(material);
       if(!Number.isFinite(qty))continue;
       const batchMultiplier=sheetBatchMultiplier(mapping.sheet||'');
