@@ -1054,7 +1054,10 @@ function Invoke-SigmaNestImportGeometry($Request){
       throw ('SigmaNEST reload lost imported geometry: '+$partCountAfterReload+' part(s) remain, '+$queued.Count+' were expected.')
     }
     $phase='VERIFY_SAVED_CL_PART_DATA'
-    SN-Verify-WorkspaceCLData -app $app -requestParts $queued
+    # Verification returns a boolean. Suppress it so this function emits exactly
+    # one result object; otherwise PowerShell combines the boolean and result
+    # object into System.Object[], which breaks the worker's Int32 conversions.
+    [void](SN-Verify-WorkspaceCLData -app $app -requestParts $queued)
     return [pscustomobject]@{
       ok=$true
       phase='IMPORT_COMPLETE'
