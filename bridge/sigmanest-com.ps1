@@ -1188,16 +1188,19 @@ function Invoke-SigmaNestAutoTask($Request){
     # imported workspace first, then let AutoTask organize/nest those tasks.
     $phase='CREATE_TASKS_FOR_IMPORTED_PARTS'
     $app.CreateTasksListForNewPartsInWS()
-    Start-Sleep -Milliseconds 300
+    Start-Sleep -Milliseconds 500
     $taskCountBefore=0
     try{$taskCountBefore=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
     if($taskCountBefore -le 0){
       throw 'SigmaNEST could not create TasksList entries from the imported workspace parts.'
     }
+    # Force the visible SigmaNEST UI to rebuild its tree before AutoTask.
+    try{$app.RefreshTreeView()}catch{}
+    try{$app.Redraw()}catch{}
 
     $phase='AUTO_TASK'
     $app.AutoTask()
-    Start-Sleep -Milliseconds 1000
+    Start-Sleep -Milliseconds 1500
     $taskCount=0
     try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
     if($taskCount -le 0){
@@ -1210,6 +1213,11 @@ function Invoke-SigmaNestAutoTask($Request){
     $taskData=SN-Set-TaskNameAndBatch -app $app -requestParts $Request.parts
     $phase='SAVE'
     $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
+    # Refresh the existing SigmaNEST UI without reloading the workspace. Reloading
+    # here can invalidate Part Parameters windows; tree refresh is sufficient to
+    # expose the newly-created tasks.
+    try{$app.RefreshTreeView()}catch{}
+    try{$app.Redraw()}catch{}
     $ok=($taskData.warnings.Count -eq 0)
     return [pscustomobject]@{
       ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
