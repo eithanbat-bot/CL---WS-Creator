@@ -22,6 +22,7 @@ $part=[pscustomobject]@{
   Name='TEST-001'
   DrawingNumber=''
   PartFilename='TEST-001.DXF'
+  QtyToNest=16
   NumberToNest=16
   BatchQty=16
   Material='OLD'
@@ -38,7 +39,7 @@ $requestPart=[pscustomobject]@{
 }
 $updated=@(SN-Apply-WorkspacePartData -app $app -requestParts @($requestPart) -jobName 'SELFTEST')
 Assert ($updated.Count -eq 1) 'Part-data update did not return exactly one record.'
-Assert ($part.NumberToNest -eq 4) ("NumberToNest was not changed to 4; got $($part.NumberToNest).")
+Assert ($part.QtyToNest -eq 4) ("QtyToNest was not changed to 4; got $($part.QtyToNest).")
 Assert ($part.BatchQty -eq 16) ("BatchQty was incorrectly changed during part import; got $($part.BatchQty).")
 Assert ($part.Material -eq 'MS') ("Material was not changed to MS; got $($part.Material).")
 Assert ([double]$part.Thickness -eq 8.0) ("Thickness was not changed to 8mm; got $($part.Thickness).")
@@ -49,6 +50,7 @@ $taskPart=[pscustomobject]@{
   Name='TEST-001'
   Material='OLD'
   Thickness=3.0
+  QtyToNest=99
   NumberToNest=99
   BatchQty=99
   Quantity=99
@@ -73,7 +75,7 @@ $taskResult=SN-Set-TaskNameAndBatch -app $taskApp -requestParts @($taskRequest)
 
 Assert ($taskPart.Material -eq 'MS') ("Task material was not MS; got $($taskPart.Material).")
 Assert ([double]$taskPart.Thickness -eq 8.0) ("Task thickness was not 8mm; got $($taskPart.Thickness).")
-Assert ([double]$taskPart.NumberToNest -eq 4) ("Task quantity was not 4; got $($taskPart.NumberToNest).")
+Assert ([double]$taskPart.QtyToNest -eq 4) ("Task quantity was not 4; got $($taskPart.QtyToNest).")
 Assert ([double]$taskPart.BatchQty -eq 99) ("Task quantity operation unexpectedly changed part BatchQty; got $($taskPart.BatchQty).")
 Assert ($taskResult.tasks.Count -eq 1) 'Task result did not contain exactly one task.'
 Assert ($taskResult.tasks[0].labelApplied) 'Task label was not applied in the COM simulation.'
