@@ -69,7 +69,13 @@ function Safe-Set($obj,[string]$name,$value){
 }
 
 function Get-PartsCount($app){
-  try{return [int]$app.PartsList.Count}catch{return 0}
+  try{
+    $v=$app.PartsList.Count
+    if($v -is [System.Array]){
+      $v=@($v|Where-Object {$_ -ne $null})[0]
+    }
+    return [int]$v
+  }catch{return 0}
 }
 
 function Get-NewPart($app,[int]$beforeCount,[string]$label){
