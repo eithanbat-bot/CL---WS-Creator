@@ -943,13 +943,13 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
 
         $set=$null
         $readBack=$null
-        # BatchQty is the CL quantity per vehicle; do not let a generic task Quantity field
-        # reinterpret the CL quantity as a batch-multiplied value.
-        foreach($propertyName in @('BatchQty','BatchQuantity','QtyToNest','QuantityToNest','Quantity','Qty','QtyRequired','QtyReq')){
+        # Part Parameters quantity is the CL quantity. Prefer the explicit Number To Nest
+        # fields used by the SigmaNEST part record; BatchQty is only a final fallback.
+        foreach($propertyName in @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity','BatchQuantity','BatchQty')){
           try{
             $taskPart.$propertyName=$quantity
-            $readBack=[double]$taskPart.$propertyName
-            if($readBack -eq $quantity){
+            $readBack=SN-Scalar-Number -value $taskPart.$propertyName -default [double]::NaN
+            if(-not [double]::IsNaN([double]$readBack) -and $readBack -eq $quantity){
               $set=$propertyName
               break
             }
