@@ -18,7 +18,7 @@ Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry poin
 Assert ($com.Contains("CreateTasksListForNewPartsInWS")) 'Task creation method missing.'
 Assert ($com -match '\$phase\s*=\s*''CREATE_TASKS_FOR_IMPORTED_PARTS''') 'AutoTask phase does not explicitly create tasks before AutoTask.'
 Assert ($com -match '\$phase\s*=\s*''AUTO_TASK''') 'AutoTask phase missing.'
-Assert ($com.Contains("try{$app.RefreshTreeView()}catch{}")) 'SigmaNEST tree refresh missing.'
+Assert ($com.Contains('try{$app.RefreshTreeView()}catch{}')) 'SigmaNEST tree refresh missing.'
 Assert ($com.Contains("NumberToNest','NumberToLoad'")) 'Part quantity aliases do not prefer Number To Nest.'
 Assert ($com.Contains("[void](SN-Verify-WorkspaceCLData")) 'Import verification output is not suppressed.'
 Assert ($worker.Contains('$rawEngineData=@(if($mode -eq ''IMPORT_ONLY'')')) 'Worker does not capture complete engine pipeline output.'
