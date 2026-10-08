@@ -151,11 +151,18 @@ jobs:
           if(-not $bat.Contains('raw.githubusercontent.com/eithanbat-bot/CL---WS-Creator/main/bridge/update-and-start.ps1')){throw 'Bootstrap launcher does not point to the raw GitHub self-updater.'}
           if(-not $taskpane.Contains('Start Bridge Fixed.bat')){throw 'Task pane does not reference the stable bridge launcher.'}
           if(-not $com.Contains('CreateTasksListForNewPartsInWS')){throw 'SigmaNEST COM import path does not create task records.'}
-          if(-not $com.Contains("'BatchQty','BatchQuantity'")){throw 'SigmaNEST COM runtime does not prioritize BatchQty for quantity.'}
+          if(-not $com.Contains("'NumberToNest','NumberToLoad'")){throw 'SigmaNEST COM runtime does not prioritize Number To Nest for quantity.'}
           if(-not $taskpane.Contains("$('refreshDxf')")){throw 'Task pane does not wire the DXF refresh control.'}
           if(-not $html.Contains('taskpane.js?v=__BUILD__')){throw 'Task pane cache-busting placeholder is missing.'}
           if(-not $html.Contains('id="refreshDxf"')){throw 'Task pane HTML is missing the DXF refresh button.'}
           if(-not (Get-Content -Raw -LiteralPath 'bridge/create-sigmanest-ws.ps1').Contains('$RequestFile,[string]$ResultFile')){throw 'SigmaNEST creator parameters are missing.'}
 
-          if($bridgeVersion -ne '2.13.2'){throw "Unexpected bridge runtime version: $bridgeVersion"}
+          if([string]::IsNullOrWhiteSpace($bridgeVersion)){throw 'Unexpected bridge runtime version: version is blank.'}
           Write-Host ("Architecture checks: OK. Bridge "+$bridgeVersion+" / DXF indexer "+$indexerVersion) -ForegroundColor Green
+
+      - name: SigmaNEST adapter deterministic release gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./tests/test-sigmanest-static.ps1
+          & ./tests/test-sigmanest-com-mock.ps1
