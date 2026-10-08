@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.16.0'
+$WorkerVersion='2.17.0'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
@@ -44,7 +44,7 @@ try{
     Write-BuildStatus $statusFile ([ordered]@{jobId=[string]$request.jobId;state='RUNNING';phase=$phase;message='Matching CL parts and preparing the SigmaNEST geometry operation.';workerVersion=$WorkerVersion;pid=$PID;started=$started.ToString('o');finished=$null;elapsedSeconds=((Get-Date).ToUniversalTime()-$started).TotalSeconds;result=$null;parts=@($request.reportParts);jobName=[string]$request.jobName;selectedSheets=@($request.selectedSheets)})
     $prepared=Prepare-SigmaNestBuild -b $request.buildRequest
     if($null -eq $prepared){throw 'Background build preparation returned no result.'}
-    if($prepared.PSObject.Properties.Name -contains 'Status' -and [int]$prepared.Status -ne 200){throw [string]$prepared.Data.message}
+    if($prepared.PSObject.Properties.Name -contains 'Status' -and (SN-Scalar-Int -value $prepared.Status -default -1) -ne 200){throw [string]$prepared.Data.message}
     $request.reportParts=@($prepared.parts)
     $request.outputDir=[string]$prepared.outputDir
     $request.jobName=[string]$prepared.jobName
@@ -52,7 +52,7 @@ try{
 
     if($prepared.noGeometry){
       $finished=(Get-Date).ToUniversalTime()
-      Write-BuildStatus $statusFile ([ordered]@{jobId=[string]$request.jobId;state='COMPLETE';phase='PREPARE';message=[string]$prepared.message;workerVersion=$WorkerVersion;pid=$PID;started=$started.ToString('o');finished=$finished.ToString('o');elapsedSeconds=[math]::Round((($finished-$started).TotalSeconds),1);result=$prepared;parts=@($prepared.parts);outputDir=[string]$prepared.outputDir;jobName=[string]$prepared.jobName;selectedSheets=@($prepared.selectedSheets);reviewCount=[int]$prepared.reviewCount;reviewBreakdown=$prepared.reviewBreakdown;importedCount=0;missingCount=[int]$prepared.missingCount;wsPath=''}) 
+      Write-BuildStatus $statusFile ([ordered]@{jobId=[string]$request.jobId;state='COMPLETE';phase='PREPARE';message=[string]$prepared.message;workerVersion=$WorkerVersion;pid=$PID;started=$started.ToString('o');finished=$finished.ToString('o');elapsedSeconds=[math]::Round((($finished-$started).TotalSeconds),1);result=$prepared;parts=@($prepared.parts);outputDir=[string]$prepared.outputDir;jobName=[string]$prepared.jobName;selectedSheets=@($prepared.selectedSheets);reviewCount=(SN-Scalar-Int -value $prepared.reviewCount -default 0);reviewBreakdown=$prepared.reviewBreakdown;importedCount=0;missingCount=(SN-Scalar-Int -value $prepared.missingCount -default 0);wsPath=''}) 
       Remove-Item -LiteralPath $RequestFile -Force -ErrorAction SilentlyContinue
       exit 0
     }
@@ -60,7 +60,26 @@ try{
     $engineRequest=$prepared.engineRequest
     if($null -eq $engineRequest){throw 'Background preparation returned no SigmaNEST engine request.'}
     $phase=if($mode -eq 'IMPORT_ONLY'){'IMPORT_GEOMETRY'}else{'COM_BUILD'}
-    $data=if($mode -eq 'IMPORT_ONLY'){Invoke-SigmaNestImportGeometry -Request $engineRequest}else{Invoke-SigmaNestBuild -Request $engineRequest}
+
+    # SigmaNEST COM calls can occasionally emit an extra pipeline value even
+    # when the operation itself succeeds. Capture the complete output and take
+    # only the structured engine result object. This prevents an accidental
+    # System.Object[] from reaching the Int32/count handling below.
+    $rawEngineData=@(if($mode -eq 'IMPORT_ONLY'){
+      Invoke-SigmaNestImportGeometry -Request $engineRequest
+    }else{
+      Invoke-SigmaNestBuild -Request $engineRequest
+    })
+    $engineResults=@($rawEngineData | Where-Object {
+      $null -ne $_ -and
+      $_.PSObject.Properties.Name -contains 'ok' -and
+      $_.PSObject.Properties.Name -contains 'phase'
+    })
+    if($engineResults.Count -eq 0){
+      $types=@($rawEngineData|ForEach-Object{try{$_.GetType().FullName}catch{'<unknown>'}})
+      throw ('Background SigmaNEST engine returned no structured result. Raw pipeline types: '+($types -join ', '))
+    }
+    $data=$engineResults[-1]
   }
 
   if($null -eq $data){throw 'Background SigmaNEST engine returned no result.'}
@@ -72,10 +91,10 @@ try{
   $finalParts=if($mode -eq 'IMPORT_ONLY'){@($request.reportParts)}elseif($data.parts){@($data.parts)}else{@($request.reportParts)}
   $finalOutput=if($data.outputDir){[string]$data.outputDir}else{[string]$request.outputDir}
   $finalWs=[string]$data.wsPath
-  $reviewCount=if($prepared){[int]$prepared.reviewCount}else{0}
+  $reviewCount=if($prepared){SN-Scalar-Int -value $prepared.reviewCount -default 0}else{0}
   $reviewBreakdown=if($prepared){$prepared.reviewBreakdown}else{@{}}
-  $imported=if($mode -eq 'IMPORT_ONLY' -and $data.partCount -ne $null){[int]$data.partCount}elseif($data.partCount -ne $null){[int]$data.partCount}else{0}
-  $missing=if($prepared){[int]$prepared.missingCount}else{0}
+  $imported=if($data.partCount -ne $null){SN-Scalar-Int -value $data.partCount -default 0}else{0}
+  $missing=if($prepared){SN-Scalar-Int -value $prepared.missingCount -default 0}else{0}
   $extra=[ordered]@{
     jobId=[string]$request.jobId;state=$state;phase=[string]$data.phase;message=$message;workerVersion=$WorkerVersion;pid=$PID
     started=$started.ToString('o');finished=$finished.ToString('o');elapsedSeconds=[math]::Round((($finished-$started).TotalSeconds),1)
