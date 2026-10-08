@@ -53,8 +53,7 @@ $taskPart=[pscustomobject]@{
   Quantity=99
   Qty=99
 }
-$task=New-List @($taskPart)
-$task | Add-Member -MemberType NoteProperty -Name Name -Value 'OLD TASK'
+$task=[pscustomobject]@{PartsList=(New-List @($taskPart)); Name='OLD TASK'}
 $taskList=New-List @($task)
 $taskApp=[pscustomobject]@{TasksList=$taskList}
 
