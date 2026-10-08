@@ -66,7 +66,9 @@ try{
   if($null -eq $data){throw 'Background SigmaNEST engine returned no result.'}
   $finished=(Get-Date).ToUniversalTime()
   $state=if([bool]$data.ok){'COMPLETE'}else{'FAILED'}
-  $message=if([bool]$data.ok){[string]$data.message}else{[string]$data.error}
+  $message=if([bool]$data.ok){[string]$data.message}else{
+    if($data.phase -and $data.error){"$($data.phase): $($data.error)"}else{[string]$data.error}
+  }
   $finalParts=if($mode -eq 'IMPORT_ONLY'){@($request.reportParts)}elseif($data.parts){@($data.parts)}else{@($request.reportParts)}
   $finalOutput=if($data.outputDir){[string]$data.outputDir}else{[string]$request.outputDir}
   $finalWs=[string]$data.wsPath
