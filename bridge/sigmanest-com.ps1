@@ -495,7 +495,7 @@ function SN-Verify-WorkspaceCLData($app,$requestParts){
   }
   return $true
 }
-function SN-Parts-Count($app){try{return [int]$app.PartsList.Count}catch{return 0}}
+function SN-Parts-Count($app){try{return SN-Scalar-Int -value $app.PartsList.Count -default 0}catch{return 0}}
 
 function SN-Get-NewPart($app,$beforeCount,[string]$label){
   $beforeCount=SN-Scalar-Int -value $beforeCount -default 0;
@@ -788,7 +788,7 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=
 }
 function SN-Set-TaskMaterialAndThickness($app,$requestParts){
   $taskCount=0
-  try{$taskCount=[int]$app.TasksList.Count}catch{}
+  try{$taskCount=(SN-Scalar-Int -value $app.TasksList.Count -default 0)}catch{}
   if($taskCount -le 0){
     throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL material/thickness safely.'
   }
@@ -813,7 +813,7 @@ function SN-Set-TaskMaterialAndThickness($app,$requestParts){
       if($null -eq $task){continue}
 
       $taskPartCount=0
-      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
+      try{$taskPartCount=(SN-Scalar-Int -value $task.PartsList.Count -default 0)}catch{}
       if($taskPartCount -le 0){continue}
 
       for($pi=0;$pi -lt $taskPartCount;$pi++){
@@ -899,7 +899,7 @@ function SN-Set-TaskMaterialAndThickness($app,$requestParts){
 
 function SN-Set-TaskPartQuantity($app,$requestParts){
   $taskCount=0
-  try{$taskCount=[int]$app.TasksList.Count}catch{}
+  try{$taskCount=(SN-Scalar-Int -value $app.TasksList.Count -default 0)}catch{}
   if($taskCount -le 0){
     throw 'SigmaNEST created no TasksList entries after CreateTasksListForNewPartsInWS; cannot apply CL quantities safely.'
   }
@@ -916,7 +916,7 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
       if($null -eq $task){continue}
 
       $taskPartCount=0
-      try{$taskPartCount=[int]$task.PartsList.Count}catch{}
+      try{$taskPartCount=(SN-Scalar-Int -value $task.PartsList.Count -default 0)}catch{}
       if($taskPartCount -le 0){continue}
 
       for($pi=0;$pi -lt $taskPartCount -and -not $matched;$pi++){
@@ -1080,7 +1080,7 @@ function SN-Set-TaskNameAndBatch($app,$requestParts){
     $task=$null;try{$task=$app.TasksList.Items($ti)}catch{continue}
     if($null -eq $task){continue}
     $names=@();$materials=@();$thks=@();$multis=@()
-    $pc=0;try{$pc=[int]$task.PartsList.Count}catch{}
+    $pc=0;try{$pc=(SN-Scalar-Int -value $task.PartsList.Count -default 0)}catch{}
     for($pi=0;$pi -lt $pc;$pi++){
       try{$tp=$task.PartsList.Items($pi)}catch{continue}
       $pn='';try{$pn=[string]$tp.Name}catch{}
