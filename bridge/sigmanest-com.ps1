@@ -762,33 +762,12 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=
   $errors=@()
 
   if($sourceType -eq 'DXF'){
-    # Explicit DXF import first. The source is the exact .DXF path chosen by the
-    # library matcher; SigmaNEST is never allowed to resolve a PRS by name.
+    # Use the exact .DXF path selected by the matcher. Do not probe the
+    # PartsList.Import overloads: some SigmaNEST COM registrations bind the
+    # reflection argument array incorrectly and surface "System.Object[] ->
+    # System.Int32" conversion errors. LoadPart accepts the exact path and
+    # keeps DXF selection deterministic; PRS fallback is forbidden here.
     try{
-      $settings=$null
-      try{$settings=New-Object -ComObject SigmaNEST.SNPartImportSettings}catch{}
-      foreach($importId in @(0,1,2,3)){
-        try{
-          $before=SN-Parts-Count $app
-          $result=SN-Invoke-ComMethod $app.PartsList 'Import' @([string]$sourcePath,[int]$importId,$settings)
-          Start-Sleep -Milliseconds 150
-          $after=SN-Parts-Count $app
-          if($after -gt $before -or ($null -ne $result -and [bool]$result)){
-            return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method=('PartsList.Import '+$importId+'-DXF')}
-          }
-        }catch{
-          $errors+=('PartsList.Import '+$importId+': '+(SN-ErrorText $_))
-        }
-      }
-    }catch{
-      $errors+=('DXF PartsList.Import setup: '+(SN-ErrorText $_))
-    }
-
-    # Some X1.4 installations accept a DXF through LoadPart. This remains safe
-    # because the exact .DXF path is used and PRS fallback is forbidden.
-    try{
-      # LoadPart may queue the geometry until CreatePartsListForNewPartsInWS;
-      # the caller performs that commit and verifies the final PartsList count.
       [void]$app.LoadPart([string]$sourcePath)
       return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='LoadPart-DXF-GEOMETRY'}
     }catch{
@@ -1050,24 +1029,19 @@ function Invoke-SigmaNestImportGeometry($Request){
     if($after -lt ($before+$queued.Count)){throw ('SigmaNEST committed '+($after-$before)+' part(s) but '+$queued.Count+' were requested.')}
     $phase='APPLY_CL_PART_DATA'
     $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued -jobName $safe -linkFile ([string]$Request.clLinkFile)
-    $phase='CREATE_TASKS'
-    $app.CreateTasksListForNewPartsInWS()
-    $taskCount=0
-    try{$taskCount=[int]$app.TasksList.Count}catch{}
-    if($taskCount -le 0){throw 'SigmaNEST created no TasksList entries after the CL part records were applied.'}
-    $phase='APPLY_CL_TASK_DATA'
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $queued
-    SN-Set-TaskPartQuantity -app $app -requestParts $queued
+
+    # IMPORT_ONLY intentionally stops here. Do not create TasksList entries and
+    # do not call AutoTask. The operator must be able to inspect/correct the
+    # imported PartsList data before any task is generated.
     $phase='SAVE_WORKSPACE'
-    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data import')
-    $phase='RELOAD_AND_REAPPLY_CL_TASK_DATA'
+    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import')
+    $phase='RELOAD_AND_VERIFY_PART_DATA'
     $app.LoadWorkSpaceFile([string]$wsPath)
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $queued
-    SN-Set-TaskPartQuantity -app $app -requestParts $queued
-    $phase='SAVE_VERIFIED_WORKSPACE'
-    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'verified CL-data import')
+    $partCountAfterReload=SN-Parts-Count $app
+    if($partCountAfterReload -lt $queued.Count){
+      throw ('SigmaNEST reload lost imported geometry: '+$partCountAfterReload+' part(s) remain, '+$queued.Count+' were expected.')
+    }
     $phase='VERIFY_SAVED_CL_PART_DATA'
-    $app.LoadWorkSpaceFile([string]$wsPath)
     SN-Verify-WorkspaceCLData -app $app -requestParts $queued
     return [pscustomobject]@{
       ok=$true
@@ -1077,8 +1051,8 @@ function Invoke-SigmaNestImportGeometry($Request){
       partCount=$created.Count
       partUpdates=@($partUpdates)
       clLinkFile=[string]$Request.clLinkFile
-      tasksCreated=$taskCount
-      message=('Geometry imported, CL material/thickness/quantity applied to both SigmaNEST part and task records, re-applied after reload, verified, and saved to '+$wsPath+'. AutoTask was not run.')
+      tasksCreated=0
+      message=('Geometry imported and CL material/thickness/quantity applied to SigmaNEST PartsList, verified, and saved to '+$wsPath+'. Tasks/AutoTask were not run; review the workspace before using AutoTask.')
       sourceCount=$created.Count
     }
   }catch{
