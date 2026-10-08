@@ -64,17 +64,21 @@ function clearResults(){
   $('totalQty').textContent='0';
 }
 
+function normalizeParts(parts){
+  return Array.isArray(parts) ? parts.filter(function(x){return x&&typeof x==='object';}) : [];
+}
+
 function sumQty(parts){
-  return (parts||[]).reduce(function(a,x){return a+(Number(x.qty)||0)},0);
+  return normalizeParts(parts).reduce(function(a,x){return a+(Number(x.qty)||0)},0);
 }
 
 function statusCount(parts, label){
-  return (parts||[]).filter(function(x){return String(x.statusLabel||'')===label}).length;
+  return normalizeParts(parts).filter(function(x){return String(x.statusLabel||'')===label}).length;
 }
 
 async function writeReportSheets(result,job,selectedSheetNames,actionName){
   actionName=actionName||'Operation';
-  var parts=result.parts||[];
+  var parts=normalizeParts(result.parts);
   var review=parts.filter(function(x){return x.status!=='READY'});
   var ready=parts.filter(function(x){return x.status==='READY'});
   var prs=parts.filter(function(x){return String(x.sourceType||'')==='PRS'});
@@ -322,8 +326,9 @@ async function readCL(){
 function showParts(parts,statusMode){
   var body=$('resultTable').querySelector('tbody');
   body.innerHTML='';
+  parts=normalizeParts(parts);
   $('partsFound').textContent=parts.length;
-  $('totalQty').textContent=parts.reduce(function(a,x){return a+x.qty},0);
+  $('totalQty').textContent=sumQty(parts);
   parts.forEach(function(p){
     var tr=document.createElement('tr');
     var st=statusMode==='preview'?'—':(p.statusLabel||p.status||'');
@@ -463,7 +468,7 @@ async function waitForBuild(jobId,job,selectedNames,actionName){
     }
 
     var result=s.result||{};
-    result.parts=s.parts||result.parts||[];
+    result.parts=normalizeParts(s.parts||result.parts||[]);
     result.outputDir=s.outputDir||result.outputDir||'';
     result.wsPath=result.wsPath||s.wsPath||currentWsPath||'';
     result.importedCount=result.importedCount!=null?result.importedCount:(s.importedCount!=null?s.importedCount:0);
@@ -475,7 +480,7 @@ async function waitForBuild(jobId,job,selectedNames,actionName){
     result.reviewCount=result.reviewCount!=null?result.reviewCount:(s.reviewCount!=null?s.reviewCount:0);
     result.reviewBreakdown=result.reviewBreakdown||s.reviewBreakdown||{};
 
-    lastActionParts=Array.isArray(result.parts)?result.parts:[];
+    lastActionParts=normalizeParts(result.parts);
     showParts(result.parts,'build');
     if(result.wsPath)updateWorkspacePath(result.wsPath);
 
@@ -515,7 +520,8 @@ async function importGeometry(){
     if(String(ds.root||'').toUpperCase()===String(dxfRoot).toUpperCase()&&String(ds.state||'').toUpperCase()!=='COMPLETE'){
       throw new Error('DXF index is not complete yet. '+(ds.filesFound||0)+' DXFs indexed so far.');
     }
-    var parts=await readCL();
+    var parts=normalizeParts(await readCL());
+    if(!parts.length)throw new Error('No valid CL parts are available for import.');
     var selectedNames=selectedSheets().map(function(x){return x.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
@@ -531,7 +537,8 @@ async function autoTaskOrder(){
   var btn=$('autoTaskOrder');btn.disabled=true;
   try{
     if(!currentWsPath)throw new Error('Import Geometry first or enter the path of an existing SigmaNEST .ws.');
-    var parts=lastActionParts.length?lastActionParts:await readCL();
+    var parts=normalizeParts(lastActionParts.length?lastActionParts:await readCL());
+    if(!parts.length)throw new Error('No valid CL parts are available for AutoTask. Run Import Geometry Only first.');
     var selectedNames=selectedSheets().map(function(x){return x.name});
     var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
     var job=$('jobName').value.trim()||'CL_JOB';
