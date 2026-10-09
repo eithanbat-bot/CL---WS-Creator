@@ -517,6 +517,19 @@ async function waitForBuild(jobId,job,selectedNames,actionName){
     result.reviewCount=result.reviewCount!=null?result.reviewCount:(s.reviewCount!=null?s.reviewCount:0);
     result.reviewBreakdown=result.reviewBreakdown||s.reviewBreakdown||{};
 
+    // A tasking job is not marked successful unless every returned SigmaNEST
+    // task explicitly confirms its saved batch multiplier and order label.
+    if(state==='COMPLETE' && actionName.indexOf('AutoTask')===0){
+      var verifiedTasks=Array.isArray(result.taskData)?result.taskData:[];
+      var unverifiedTasks=verifiedTasks.filter(function(t){return t.batchApplied!==true||t.labelApplied!==true;});
+      if(!verifiedTasks.length || unverifiedTasks.length){
+        state='FAILED';
+        s.message=!verifiedTasks.length
+          ? 'AutoTask returned no task-level batch/label verification. The workspace is not release-verified.'
+          : 'AutoTask returned '+unverifiedTasks.length+' task(s) without verified batch and/or order labels. The workspace is not release-verified.';
+      }
+    }
+
     lastActionParts=normalizeParts(result.parts);
     showParts(result.parts,'build');
     if(result.wsPath)updateWorkspacePath(result.wsPath);
@@ -530,7 +543,13 @@ async function waitForBuild(jobId,job,selectedNames,actionName){
       $('releaseDetail').textContent=(result.message||'Operation completed.')+' '+(result.wsPath||'');
       try{await writeReportSheets(result,job,selectedNames,actionName);}catch(e){}
       pill(result.warnings&&result.warnings.length?'Completed with warnings':'Completed','ok');
-      $('buildStatus').textContent=(result.message||actionName+' completed.')+' Release Summary updated.';
+      var completionMessage=(result.message||actionName+' completed.');
+      if(actionName==='Import Geometry'){
+        completionMessage+=' NEXT: review the Import Data Check worksheet, then click the green Run Add-in AutoTask + Label Order button in this pane. Do not use SigmaNEST\'s top-ribbon Auto Nest for the managed batch/label step.';
+      }else if(actionName.indexOf('AutoTask')===0){
+        completionMessage+=' Verified '+(result.taskData||[]).length+' task(s) in the saved workspace.';
+      }
+      $('buildStatus').textContent=completionMessage+' Release Summary updated.';
       return result;
     }
 
