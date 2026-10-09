@@ -1175,21 +1175,37 @@ function Invoke-SigmaNestImportGeometry($Request){
       throw ('SigmaNEST has '+$actualCount+' imported part(s), but '+$queued.Count+' geometry item(s) were requested.')
     }
     $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued -jobName $safe -linkFile ([string]$Request.clLinkFile)
-    $phase='VERIFY_IMPORTED_CL_DATA'
+    # PartsList holds geometry, material, thickness and per-vehicle quantity.
+    # BatchQty is held at x1 on PartsList until TasksList is created; SigmaNEST
+    # multiplies QtyToNest when the task list is generated if BatchQty is already xN.
+    $partListUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued -jobName $safe -linkFile ([string]$Request.clLinkFile) -DeferBatchToTasks
+    $phase='VERIFY_IMPORTED_CL_PART_DATA'
     [void](SN-Verify-WorkspaceCLData -app $app -requestParts $queued)
 
-    # The geometry seed has now been loaded into SNApp. Save this active,
-    # populated workspace with SNApp.SaveWorkSpaceFile; SNAutomation.FileSave
-    # is only valid for the initial AddPartImport seed, not subsequent edits.
+    # Prepare the saved TasksList during import, but do NOT run AutoTask here.
+    # This is where SigmaNEST can persist the production batch independently
+    # from its per-vehicle part quantity.
+    $phase='CREATE_TASKS_FOR_CL_DATA'
+    [void]$app.CreateTasksListForNewPartsInWS()
+    Start-Sleep -Milliseconds 500
+    $preparedTaskCount=0
+    try{$preparedTaskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
+    if($preparedTaskCount -le 0){throw 'SigmaNEST could not create TasksList entries during Import Geometry; CL production data cannot be saved for tasking.'}
+
+    $phase='APPLY_CL_TASK_DATA'
+    $taskUpdates=@(SN-Apply-TaskCLData -app $app -requestParts $queued)
+    [void](SN-Verify-WorkspaceTaskData -app $app -requestParts $queued)
+
+    # Save the active, populated workspace using SNApp.SaveWorkSpaceFile.
+    # SNAutomation.FileSave is only for the initial AddPartImport seed.
     $phase='SAVE_WORKSPACE'
-    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import')
+    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data PartsList and TasksList import')
     $phase='VERIFY_SAVED_WORKSPACE'
     if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST workspace file was not created: '+$wsPath)}
     if((Get-Item -LiteralPath $wsPath).Length -le 1000){throw ('SigmaNEST saved an empty workspace after CL data was applied: '+$wsPath)}
 
-    # Reopen the actual file from disk and verify production values were saved,
-    # not merely held in the current COM session.
+    # Reopen the actual saved file to prove its PartsList and TasksList both
+    # contain the CL production values. AutoTask remains deliberately unrun.
     if($app){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app);$app=$null}
     [void]$automation.ResetSigmaNEST()
     [void]$automation.FileNew()
@@ -1199,16 +1215,22 @@ function Invoke-SigmaNestImportGeometry($Request){
     [void]$app.LoadWorkSpaceFile([string]$wsPath)
     Start-Sleep -Milliseconds 500
     $actualCount=SN-Parts-Count $app
-    if($actualCount -lt $queued.Count){throw ('Saved WS has '+$actualCount+' part(s), but '+$queued.Count+' CL part(s) were imported.')}
-    $phase='VERIFY_SAVED_CL_DATA'
+    if($actualCount -lt $queued.Count){throw ('Saved WS has '+$actualCount+' PartsList part(s), but '+$queued.Count+' CL part(s) were imported.')}
+    $phase='VERIFY_SAVED_CL_PART_DATA'
     [void](SN-Verify-WorkspaceCLData -app $app -requestParts $queued)
-    $savedPartData=SN-Read-WorkspaceProductionData -app $app
+    $phase='VERIFY_SAVED_CL_TASK_DATA'
+    [void](SN-Verify-WorkspaceTaskData -app $app -requestParts $queued)
+    $savedPartData=@(SN-Read-WorkspaceProductionData -app $app)
+    $savedTaskCount=0
+    try{$savedTaskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
+    if($savedTaskCount -le 0){throw 'Saved WS did not retain the CL production TasksList created during Import Geometry.'}
     try{[void]$app.RefreshTreeView()}catch{}
     try{[void]$app.Redraw()}catch{}
     return [pscustomobject]@{
       ok=$true;phase='IMPORT_COMPLETE';wsPath=$wsPath;parts=$created;partCount=$actualCount
-      partUpdates=@($partUpdates);clLinkFile=[string]$Request.clLinkFile;tasksCreated=0
-      message=('Geometry imported; CL material, thickness, per-vehicle quantity and batch multiplier were verified from the saved WS '+$wsPath+'. AutoTask was not run.')
+      partUpdates=@($taskUpdates);partListUpdates=@($partListUpdates);clLinkFile=[string]$Request.clLinkFile
+      tasksCreated=$savedTaskCount;tasksPrepared=$savedTaskCount
+      message=('Geometry and all CL production data (material, thickness, per-vehicle quantity and batch multiplier) were applied to PartsList/TasksList, saved and verified in '+$wsPath+'. AutoTask was not run.')
       sourceCount=$created.Count;savedPartData=@($savedPartData)
     }
   }catch{
@@ -1541,18 +1563,12 @@ function Invoke-SigmaNestAutoTask($Request){
     $workspaceParts=@(SN-Read-WorkspaceProductionData -app $app)
     if($workspaceParts.Count -le 0){throw 'No production part data could be read from the saved WS.'}
 
-    # An imported workspace contains PartsList entries but not necessarily the
-    # task objects that SigmaNEST AutoTask expects. Build tasks from the saved
-    # parts, then let AutoTask organize/nest them.
-    $phase='CREATE_TASKS_FOR_IMPORTED_PARTS'
-    [void]$app.CreateTasksListForNewPartsInWS()
-    Start-Sleep -Milliseconds 500
-    $taskCountBefore=0
-    try{$taskCountBefore=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
-    if($taskCountBefore -le 0){
-      throw 'SigmaNEST could not create TasksList entries from the imported workspace parts.'
-    }
-    # Force the visible SigmaNEST UI to rebuild its tree before AutoTask.
+    # Import Geometry has already created TasksList and applied/verified the CL
+    # production fields. Never create TasksList again here: that can multiply
+    # quantities a second time. Snapshot the saved WS and run AutoTask only.
+    $preparedTaskCount=0
+    try{$preparedTaskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
+    if($preparedTaskCount -le 0){throw 'The saved WS has no prepared production TasksList. Run Import Geometry and verify CL data before AutoTask.'}
     try{[void]$app.RefreshTreeView()}catch{}
     try{[void]$app.Redraw()}catch{}
 
@@ -1561,25 +1577,42 @@ function Invoke-SigmaNestAutoTask($Request){
     Start-Sleep -Milliseconds 1500
     $taskCount=0
     try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
-    if($taskCount -le 0){
-      throw 'SigmaNEST AutoTask completed but no TasksList entries are present.'
-    }
-    $phase='LABEL_AND_BATCH'
+    if($taskCount -le 0){throw 'SigmaNEST AutoTask completed but no TasksList entries are present.'}
+
+    # AutoTask is allowed to reorganize the job, but production values always
+    # come from the snapshot read from the saved WS, never from the CL workbook.
+    $phase='RESTORE_SAVED_WS_TASK_DATA'
+    $taskUpdates=@(SN-Apply-TaskCLData -app $app -requestParts $workspaceParts)
+    $phase='VERIFY_AUTOTASK_TASK_DATA'
+    [void](SN-Verify-WorkspaceTaskData -app $app -requestParts $workspaceParts)
+    $phase='LABEL_TASKS'
     $taskData=SN-Set-TaskNameAndBatch -app $app -workspaceParts $workspaceParts
     $phase='SAVE'
     $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
-    # Refresh the existing SigmaNEST UI without reloading the workspace. Reloading
-    # here can invalidate Part Parameters windows; tree refresh is sufficient to
-    # expose the newly-created tasks.
+    # Reopen from disk and verify the actual saved task-side production fields.
+    if($app){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app);$app=$null}
+    [void]$automation.ResetSigmaNEST()
+    [void]$automation.FileNew()
+    Start-Sleep -Milliseconds 300
+    $app=New-Object -ComObject SigmaNEST.SNApp
+    if($null -eq $app){throw 'SigmaNEST.SNApp returned null during AutoTask save verification.'}
+    [void]$app.LoadWorkSpaceFile([string]$wsPath)
+    Start-Sleep -Milliseconds 500
+    $phase='VERIFY_SAVED_AUTOTASK_DATA'
+    [void](SN-Verify-WorkspaceTaskData -app $app -requestParts $workspaceParts)
+    $savedTaskData=@(SN-Read-WorkspaceProductionData -app $app)
+    $taskCount=0
+    try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
+    if($taskCount -le 0){throw 'The saved AutoTask workspace contains no tasks after reload.'}
     try{[void]$app.RefreshTreeView()}catch{}
     try{[void]$app.Redraw()}catch{}
     $ok=($taskData.warnings.Count -eq 0)
     return [pscustomobject]@{
       ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
       partCount=(SN-Parts-Count $app);importedCount=(SN-Parts-Count $app)
-      parts=@($workspaceParts)
-      taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@()
-      message=$(if($ok){'AutoTask used the saved WS production data and completed '+$taskCount+' task(s), including batch multipliers.'}else{'AutoTask completed '+$taskCount+' task(s) with warnings; see the Release Summary.'})
+      parts=@($savedTaskData)
+      taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@($taskUpdates)
+      message=$(if($ok){'AutoTask used the saved WS production data, applied its batch multipliers, and saved/verified '+$taskCount+' task(s).'}else{'AutoTask completed '+$taskCount+' task(s) with warnings; see the Release Summary.'})
     }
   }catch{
     return [pscustomobject]@{
