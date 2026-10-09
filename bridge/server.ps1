@@ -794,7 +794,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.13.2'
+    workerVersion='2.22.0'
     pid=$null
     started=$started.ToString('o')
     finished=$null
