@@ -87,6 +87,7 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
   var missing=parts.filter(function(x){return x.status==='MISSING'});
   var updates=Array.isArray(result.partUpdates)?result.partUpdates:[];
   var tasks=Array.isArray(result.taskData)?result.taskData:[];
+  var batchAppliedCount=tasks.length?tasks.filter(function(x){return x.batchApplied}).length:updates.filter(function(x){return Number(x.batchMultiplier)>0&&!!x.batchProperty}).length;
   var warnings=Array.isArray(result.warnings)?result.warnings:[];
   var now=new Date().toLocaleString();
 
@@ -112,11 +113,11 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
     ['Material mismatches',statusCount(parts,'MATERIAL MISMATCH'),'Thickness mismatches',statusCount(parts,'THICKNESS MISMATCH')],
     ['Best candidate selected',parts.filter(function(x){return String(x.selectionDecision||'')==='BEST CANDIDATE'}).length,'Candidate reviews',parts.filter(function(x){return String(x.statusLabel||'').indexOf('AMBIGUOUS')===0}).length],
     ['CL overrides applied',updates.filter(function(x){return !(x.warnings||[]).length}).length,'Override warnings',updates.reduce(function(n,x){return n+(x.warnings||[]).length},0)],
-    ['Batch values applied',tasks.filter(function(x){return x.batchApplied}).length,'Task labels applied',tasks.filter(function(x){return x.labelApplied}).length],
+    ['Batch values applied',batchAppliedCount,'Task labels applied',tasks.filter(function(x){return x.labelApplied}).length],
     ['','','',''],
     ['HAND-OFF','DETAIL','',''],
     ['Geometry source','DXF-FIRST: matching .DXF is selected whenever found; .PRS is fallback only when no matching DXF exists.','',''],
-    ['CL overrides','Material, thickness, per-vehicle quantity and batch multiplier are applied and verified in the saved WS during Import Geometry. AutoTask reads the saved WS and does not overwrite part data from the CL workbook.','',''],
+    ['CL overrides','Material, thickness, per-vehicle quantity, batch multiplier and CL description (SigmaNEST Remark) are applied and verified in the saved WS during Import Geometry. AutoTask reads the saved WS and does not overwrite part data from the CL workbook.','',''],
     ['Workspace',result.wsPath||currentWsPath||'Not available','',''],
     ['Warnings',warnings.join(' | '),'','']
   ];
