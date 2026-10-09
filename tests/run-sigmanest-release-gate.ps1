@@ -3,6 +3,7 @@ param(
   [switch]$RealCom,
   [switch]$HttpE2E,
   [string]$DxfPath='Y:\SOLIDWORKS\UNIVERSAL COMPONENTS\PC-2A.DXF',
+  [string]$PrsPath='S:\SNDataX1\PARTS\HSWU2 100.PRS',
   [int]$TestQty=4,
   [string]$TestMaterial='MS',
   [double]$TestThicknessMm=4.0,
@@ -26,6 +27,11 @@ if($RealCom){
   if(-not(Test-Path -LiteralPath $testPath)){throw "Real COM test is missing: $testPath"}
   Write-Host '=== Real SigmaNEST COM integration ===' -ForegroundColor Cyan
   & $testPath -DxfPath $DxfPath -TestQty $TestQty -TestMaterial $TestMaterial -TestThicknessMm $TestThicknessMm -BatchMultiplier $BatchMultiplier
+
+  $mixedPath=Join-Path $PSScriptRoot 'test-sigmanest-mixed-real.ps1'
+  if(-not(Test-Path -LiteralPath $mixedPath)){throw "Mixed DXF/PRS integration test is missing: $mixedPath"}
+  Write-Host '=== Mixed DXF + PRS SigmaNEST integration ===' -ForegroundColor Cyan
+  & $mixedPath -DxfPath $DxfPath -PrsPath $PrsPath
 }
 
 if($HttpE2E){
