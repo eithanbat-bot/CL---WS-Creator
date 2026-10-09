@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.25.0'
+$BRIDGE_VERSION = '2.26.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -146,8 +146,15 @@ function Normalize-Material([string]$s){
   ($s -replace '\s+',' ').Trim()
 }
 function Thickness-Number([string]$s){
-  $m=[regex]::Match([string]$s,'(\d+(?:\.\d+)?)\s*mm',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
-  if($m.Success){[double]$m.Groups[1].Value}else{[double]::NaN}
+  # Cutting lists may provide either a unit-labelled thickness ("4 mm",
+  # "4mm") or a plain numeric cell ("4"). Support both without extracting
+  # arbitrary digits from part names or unrelated text.
+  $value=[string]$s
+  $m=[regex]::Match($value,'(\d+(?:\.\d+)?)\s*mm',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  if($m.Success){return [double]$m.Groups[1].Value}
+  $plain=[regex]::Match($value,'^\s*(\d+(?:\.\d+)?)\s*$')
+  if($plain.Success){return [double]$plain.Groups[1].Value}
+  return [double]::NaN
 }
 function Material-Equal([string]$a,[string]$b,[string]$aThickness='',[string]$bThickness=''){
   $A=(Normalize-Material -s $a).ToUpperInvariant()
@@ -808,7 +815,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.25.0'
+    workerVersion='2.26.0'
     pid=$null
     started=$started.ToString('o')
     finished=$null
