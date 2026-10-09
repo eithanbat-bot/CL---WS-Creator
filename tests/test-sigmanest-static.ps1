@@ -44,6 +44,8 @@ Assert ($com.Contains('function SN-Set-QtyToNest')) 'Canonical SigmaNEST QtyToNe
 Assert ($com.Contains('function SN-Apply-TaskCLData($app,$requestParts)')) 'Import is missing the CL TasksList data application step.'
 Assert ($com.Contains('function SN-Verify-WorkspaceTaskData($app,$requestParts)')) 'Import verification does not verify saved TasksList batch multipliers and production fields.'
 Assert ($com.Contains('function SN-Read-WorkspaceProductionData($app)')) 'AutoTask is missing the saved-WS production-data reader.'
+Assert ($com.Contains("names @('Remark')")) 'Import must write CL descriptions into the saved WS Remark field.'
+Assert ($com.Contains('Saved WS TasksList Remark')) 'Saved-WS verification must validate the CL description.'
 Assert ($com.Contains('effectiveBatchQuantity=')) 'CL link file does not retain effective batch quantities.'
 Assert ($com.Contains("'NumberToNest','NumberToLoad','QtyToNest")) 'Fallback part quantity aliases are not present.'
 Assert ($com.Contains("[void](SN-Verify-WorkspaceCLData")) 'Import verification output is not suppressed.'
