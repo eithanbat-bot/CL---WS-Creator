@@ -1103,8 +1103,16 @@ function Invoke-SigmaNestImportGeometry($Request){
         taskBatches=@($x.taskBatches)
       }
       $queued += [pscustomobject]@{
-        part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial
-        thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=$sourceType
+        part=[string]$x.part
+        qty=$qty
+        material=[string]$(if($x.material){$x.material}else{$x.clMaterial})
+        clMaterial=[string]$(if($x.clMaterial){$x.clMaterial}else{$x.material})
+        rawMaterial=[string]$x.rawMaterial
+        thickness=[string]$(if($x.clThickness){$x.clThickness}else{$x.thickness})
+        clThickness=[string]$(if($x.clThickness){$x.clThickness}else{$x.thickness})
+        sigmaMaterial=[string]$x.sigmaMaterial
+        thicknessMm=$x.thicknessMm
+        sourcePath=$source;sourceType=$sourceType
         description=[string]$x.description
         batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
         effectiveQty=SN-Scalar-Int -value $x.effectiveQty -default ([int]$x.qty)
