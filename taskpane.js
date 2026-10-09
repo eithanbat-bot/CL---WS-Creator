@@ -198,7 +198,7 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
         var key=String(u.part||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
         if(key)updateByPart.set(key,u);
       });
-      var dataHeaders=['Part','Description','Qty per Vehicle','Batch Multiplier','Total Qty for Batch','CL Material','SigmaNEST Material','Thickness (mm)','Quantity Field','Batch Field','Description Handling','Import Verification'];
+      var dataHeaders=['Part','Description','Qty per Vehicle','Batch Multiplier','Total Qty for Batch','CL Material (normalized)','CL Material (raw)','SigmaNEST Material','Thickness (mm)','Quantity Field','Batch Field','Description Handling','Import Verification'];
       var dataRows=parts.map(function(p){
         var key=String(p.part||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
         var u=updateByPart.get(key)||{};
@@ -207,9 +207,9 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
         var productionOk=!!u.materialProperty&&!!u.thicknessProperty&&!!u.quantityProperty&&!!u.batchProperty;
         var descHandling=u.descriptionProperty|| (p.description?'Retained in CL link; no writable SigmaNEST description field was exposed':'Not supplied');
         var check=productionOk&&!warnings.length?'PASS':'CHECK';
-        return [p.part||'',p.description||'',qty,mult,qty*mult,p.material||p.clMaterial||'',p.sigmaMaterial||'',p.thicknessMm!=null?p.thicknessMm:(p.thickness||''),u.quantityProperty||'',u.batchProperty||'',descHandling,check];
+        return [p.part||'',p.description||'',qty,mult,qty*mult,p.material||p.clMaterial||'',p.rawMaterial||p.clMaterialRaw||p.material||'',p.sigmaMaterial||'',p.thicknessMm!=null?p.thicknessMm:(p.thickness||''),u.quantityProperty||'',u.batchProperty||'',descHandling,check];
       });
-      if(!dataRows.length)dataRows=[['No imported parts','','','','','','','','','','','']];
+      if(!dataRows.length)dataRows=[['No imported parts','','','','','','','','','','','','']];
       var dm=[dataHeaders].concat(dataRows);
       var dataSheet=wb.worksheets.add(dataCheckName);
       dataSheet.getRangeByIndexes(0,0,dm.length,dataHeaders.length).values=rectangular(dm,dataHeaders.length);
@@ -218,10 +218,9 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
       dataSheet.getUsedRange().format.wrapText=true;
       dataSheet.getUsedRange().format.autofitColumns();
       dataSheet.getRange('B:B').format.columnWidth=220;
-      dataSheet.getRange('F:F').format.columnWidth=155;
-      dataSheet.getRange('G:G').format.columnWidth=155;
-      dataSheet.getRange('K:K').format.columnWidth=240;
-      dataSheet.getRange('L:L').format.columnWidth=145;
+      dataSheet.getRange('F:H').format.columnWidth=155;
+      dataSheet.getRange('L:L').format.columnWidth=240;
+      dataSheet.getRange('M:M').format.columnWidth=145;
       dataSheet.freezePanes.freezeRows(1);
     }
     if(tasks.length){
