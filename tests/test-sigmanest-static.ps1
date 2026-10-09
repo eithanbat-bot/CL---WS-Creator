@@ -70,7 +70,7 @@ Assert ($bat.Contains('?cb=') -and $bat.Contains('$cb')) 'Bootstrap does not cac
 Assert ($com.Contains("function SN-Queue-Geometry(`$app,[string]`$sourcePath,[string]`$sourceType,`$clData=`$null,`$automation=`$null)")) 'Geometry queue does not accept the workspace automation object.'
 Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
 Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
-Assert ($com.Contains('$multis+= [int]$rp.batchMultiplier')) 'Task batch logic does not read multipliers from the saved workspace snapshot.'
+Assert ($com.Contains('$multis+=[int]$rp.batchMultiplier')) 'Task batch logic does not read multipliers from the saved workspace snapshot.'
 Assert ($com.Contains('[void]$automation.AddPartImport([string]$x.sourcePath,[double]1.0,[double]1.0,0,0,0)')) 'DXF import does not use SigmaNEST AddPartImport.'
 Assert ($com.Contains("importMethod=`$(if(`$sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})")) 'Import result does not distinguish DXF and PRS loading.'
 Assert ($com.Contains('[void]$automation.ResetSigmaNEST()')) 'Import/AutoTask does not clear stale SigmaNEST workspace rows before loading.'
