@@ -1028,15 +1028,9 @@ function SN-Save-WorkspaceVerified($app,[string]$wsPath,[string]$label,$automati
 }
 
 function Invoke-SigmaNestImportGeometry($Request){
-  $phase='START';$app=$null;$automation=$null;$created=@();$partUpdates=@()
+  $phase='START';$app=$null;$automation=$null;$created=@();$partUpdates=@();$queued=@()
   try{
     if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'SigmaNEST COM requires STA.'}
-    $automation=New-Object -ComObject SigmaNEST.SNAutomation
-    if($null -eq $automation){throw 'SigmaNEST.SNAutomation returned null.'}
-    [void]$automation.FileNew()
-    Start-Sleep -Milliseconds 200
-    $app=New-Object -ComObject SigmaNEST.SNApp
-    if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
     $wsDir=SN-Resolve-WS-Path -Request $Request
     $job=[string]$Request.jobName
     if([string]::IsNullOrWhiteSpace($job)){throw 'Job name is required.'}
@@ -1044,76 +1038,126 @@ function Invoke-SigmaNestImportGeometry($Request){
     if([string]::IsNullOrWhiteSpace($safe)){$safe='CL_JOB'}
     $wsPath=Join-Path $wsDir ($safe+'.ws')
     if(Test-Path -LiteralPath $wsPath){throw ('SigmaNEST WS already exists: '+$wsPath)}
-    try{$app.PartsLibrary.Directory=[string]$Request.libraryRoot}catch{}
-    $phase='IMPORT_PARTS'
-    $before=SN-Parts-Count $app
-    $queued=@()
-    foreach($x in @($Request.parts)){
+    $parts=@($Request.parts)
+    if($parts.Count -eq 0){throw 'No geometry was found to import.'}
+    $dxfParts=@($parts|Where-Object {([string]$_.sourceType).Trim().ToUpperInvariant() -eq 'DXF'})
+    $prsParts=@($parts|Where-Object {([string]$_.sourceType).Trim().ToUpperInvariant() -eq 'PRS'})
+    foreach($x in $parts){
       $source=[string]$x.sourcePath
-      if([string]::IsNullOrWhiteSpace($source)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourcePath. Refusing implicit PRS fallback.')}
       $sourceType=([string]$x.sourceType).Trim().ToUpperInvariant()
-      if([string]::IsNullOrWhiteSpace($sourceType)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourceType. Expected DXF or PRS.')}
-      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType $sourceType -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty}) -automation $automation
+      if([string]::IsNullOrWhiteSpace($source)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourcePath. Refusing implicit PRS fallback.')}
+      if($sourceType -notin @('DXF','PRS')){throw ('CL part "'+[string]$x.part+'" has unsupported sourceType "'+$sourceType+'". Expected DXF or PRS.')}
+      if(-not(Test-Path -LiteralPath $source)){throw ('Selected '+$sourceType+' geometry does not exist: '+$source)}
+      $extension=[IO.Path]::GetExtension($source).ToLowerInvariant()
+      if($sourceType -eq 'DXF' -and $extension -ne '.dxf'){throw ('DXF source has wrong file extension: '+$source)}
+      if($sourceType -eq 'PRS' -and $extension -ne '.prs'){throw ('PRS source has wrong file extension: '+$source)}
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
-      $created += [pscustomobject]@{part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial;thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN);sourcePath=$source;sourceType=[string]$x.sourceType;importMethod=[string]$load.method;matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1}
-      $queued += [pscustomobject]@{part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=[string]$x.sourceType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1;sourceSheets=@($x.sourceSheets);sourceRows=@($x.sourceRows)}
+      $created += [pscustomobject]@{
+        part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial
+        thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN)
+        sourcePath=$source;sourceType=$sourceType
+        importMethod=$(if($sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})
+        matchType=[string]$x.matchType
+        batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
+      }
+      $queued += [pscustomobject]@{
+        part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial
+        thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=$sourceType
+        batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
+        sourceSheets=@($x.sourceSheets);sourceRows=@($x.sourceRows)
+      }
     }
-    if($queued.Count -eq 0){throw 'No geometry was found to import.'}
-    $phase='COMMIT_IMPORTED_PARTS'
-    [void]$app.CreatePartsListForNewPartsInWS()
-    $after=SN-Parts-Count $app
-    if($after -lt ($before+$queued.Count)){throw ('SigmaNEST committed '+($after-$before)+' part(s) but '+$queued.Count+' were requested.')}
+
+    $phase='RESET_WORKSPACE'
+    $automation=New-Object -ComObject SigmaNEST.SNAutomation
+    if($null -eq $automation){throw 'SigmaNEST.SNAutomation returned null.'}
+    [void]$automation.ResetSigmaNEST()
+    [void]$automation.FileNew()
+    Start-Sleep -Milliseconds 300
+
+    # On this SigmaNEST build, DXF geometry must enter through AddPartImport.
+    # LoadPart(DXF) creates an in-memory PartsList entry, but saves a 265-byte
+    # empty workspace. AddPartImport + FileSave creates a real, reopenable WS.
+    if($dxfParts.Count -gt 0){
+      $phase='IMPORT_DXF_SEED'
+      foreach($x in $dxfParts){
+        [void]$automation.AddPartImport([string]$x.sourcePath,[double]1.0,[double]1.0,0,0,0)
+        Start-Sleep -Milliseconds 150
+      }
+      $phase='SAVE_DXF_SEED'
+      [void]$automation.FileSave([string]$wsPath,0,0)
+      Start-Sleep -Milliseconds 400
+      if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST did not create the DXF seed workspace: '+$wsPath)}
+      if((Get-Item -LiteralPath $wsPath).Length -le 1000){throw ('SigmaNEST DXF import produced an empty or invalid workspace ('+(Get-Item -LiteralPath $wsPath).Length+' bytes): '+$wsPath)}
+      [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($automation);$automation=$null
+
+      # ResetSigmaNEST is essential: FileNew alone leaves old loaded parts in
+      # this installation and reloading a job can merge duplicate PartList rows.
+      $phase='REOPEN_DXF_SEED'
+      $automation=New-Object -ComObject SigmaNEST.SNAutomation
+      [void]$automation.ResetSigmaNEST()
+      [void]$automation.FileNew()
+      Start-Sleep -Milliseconds 300
+      $app=New-Object -ComObject SigmaNEST.SNApp
+      if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
+      [void]$app.LoadWorkSpaceFile([string]$wsPath)
+      Start-Sleep -Milliseconds 500
+      $loadedDxfCount=SN-Parts-Count $app
+      if($loadedDxfCount -lt $dxfParts.Count){throw ('SigmaNEST saved '+$dxfParts.Count+' DXF geometry item(s), but only '+$loadedDxfCount+' part(s) could be reopened from the seed workspace.')}
+    }else{
+      $app=New-Object -ComObject SigmaNEST.SNApp
+      if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
+    }
+
+    if($prsParts.Count -gt 0){
+      $phase='IMPORT_PRS'
+      try{$app.PartsLibrary.Directory=[string]$Request.libraryRoot}catch{}
+      $beforePrs=SN-Parts-Count $app
+      foreach($x in $prsParts){
+        [void]$app.LoadPart([string]$x.sourcePath)
+      }
+      [void]$app.CreatePartsListForNewPartsInWS()
+      Start-Sleep -Milliseconds 300
+      $afterPrs=SN-Parts-Count $app
+      if($afterPrs -lt ($beforePrs+$prsParts.Count)){
+        throw ('SigmaNEST committed '+($afterPrs-$beforePrs)+' PRS part(s) but '+$prsParts.Count+' were requested.')
+      }
+    }
+
+    $phase='VERIFY_IMPORTED_PARTS'
+    $actualCount=SN-Parts-Count $app
+    if($actualCount -lt $queued.Count){
+      throw ('SigmaNEST has '+$actualCount+' imported part(s), but '+$queued.Count+' geometry item(s) were requested.')
+    }
     $phase='APPLY_CL_PART_DATA'
     $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $queued -jobName $safe -linkFile ([string]$Request.clLinkFile)
-
-    # IMPORT_ONLY intentionally stops here. Do not create TasksList entries and
-    # do not call AutoTask. The operator must be able to inspect/correct the
-    # imported PartsList data before any task is generated.
-    $phase='SAVE_WORKSPACE'
-    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import' -automation $automation)
-    # Do not reload the saved workspace through SNApp here. SigmaNEST.SNApp
-    # attaches to the active SigmaNEST UI, and a background LoadWorkSpaceFile
-    # can disturb the operator's active workspace/Part Parameters dialog.
-    # The imported PartsList was already verified before save; after save we only
-    # verify that the .ws file exists and is non-empty.
-    $phase='VERIFY_SAVED_CL_PART_DATA'
-    if(-not (Test-Path -LiteralPath $wsPath)){
-      throw ('SigmaNEST reported a successful save but the workspace file was not created: '+$wsPath)
-    }
-    try{
-      if((Get-Item -LiteralPath $wsPath).Length -le 0){
-        throw ('SigmaNEST created an empty workspace file: '+$wsPath)
-      }
-    }catch{throw ('Saved workspace verification failed: '+$_.Exception.Message)}
-    # Verification returns a boolean. Suppress it so this function emits exactly
-    # one result object; otherwise PowerShell combines the boolean and result
-    # object into System.Object[], which breaks the worker's Int32 conversions.
+    $phase='VERIFY_IMPORTED_CL_DATA'
     [void](SN-Verify-WorkspaceCLData -app $app -requestParts $queued)
+
+    # The geometry seed has now been loaded into SNApp. Save this active,
+    # populated workspace with SNApp.SaveWorkSpaceFile; SNAutomation.FileSave
+    # is only valid for the initial AddPartImport seed, not subsequent edits.
+    $phase='SAVE_WORKSPACE'
+    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import')
+    $phase='VERIFY_SAVED_WORKSPACE'
+    if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST workspace file was not created: '+$wsPath)}
+    if((Get-Item -LiteralPath $wsPath).Length -le 1000){throw ('SigmaNEST saved an empty workspace after CL data was applied: '+$wsPath)}
+    try{[void]$app.RefreshTreeView()}catch{}
+    try{[void]$app.Redraw()}catch{}
     return [pscustomobject]@{
-      ok=$true
-      phase='IMPORT_COMPLETE'
-      wsPath=$wsPath
-      parts=$created
-      partCount=$created.Count
-      partUpdates=@($partUpdates)
-      clLinkFile=[string]$Request.clLinkFile
-      tasksCreated=0
-      message=('Geometry imported and CL material/thickness/quantity applied to SigmaNEST PartsList, verified, and saved to '+$wsPath+'. Tasks/AutoTask were not run; review the workspace before using AutoTask.')
+      ok=$true;phase='IMPORT_COMPLETE';wsPath=$wsPath;parts=$created;partCount=$actualCount
+      partUpdates=@($partUpdates);clLinkFile=[string]$Request.clLinkFile;tasksCreated=0
+      message=('Geometry imported from the exact selected DXF/PRS path(s); CL material, thickness and quantity were verified and saved to '+$wsPath+'. Tasks/AutoTask were not run.')
       sourceCount=$created.Count
     }
   }catch{
     $exists=$false
     try{$exists=Test-Path -LiteralPath ([string]$wsPath)}catch{}
     return [pscustomobject]@{
-      ok=$false
-      phase=$phase
-      wsPath=$(if($exists){[string]$wsPath}else{''})
-      parts=$created
-      partCount=@($created).Count
-      partUpdates=@($partUpdates)
-      tasksCreated=0
-      checkpointSaved=$exists
+      ok=$false;phase=$phase;wsPath=$(if($exists){[string]$wsPath}else{''})
+      parts=$created;partCount=$(try{SN-Parts-Count $app}catch{0})
+      partUpdates=@($partUpdates);tasksCreated=0;checkpointSaved=$exists
       error=$_.Exception.Message
       message=$(if($exists){'SigmaNEST created a workspace checkpoint before the failure: '+$wsPath}else{'Geometry import failed before a verified workspace save.'})
     }
@@ -1212,6 +1256,7 @@ function Invoke-SigmaNestAutoTask($Request){
     $phase='RESET_WORKSPACE'
     $automation=New-Object -ComObject SigmaNEST.SNAutomation
     if($null -eq $automation){throw 'SigmaNEST.SNAutomation returned null.'}
+    [void]$automation.ResetSigmaNEST()
     [void]$automation.FileNew()
     Start-Sleep -Milliseconds 250
     $app=New-Object -ComObject SigmaNEST.SNApp
