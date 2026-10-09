@@ -48,7 +48,7 @@ try{
   if([string]::IsNullOrWhiteSpace($wsPath)){ $wsPath=[string]$importStatus.result.wsPath }
   if(-not(Test-Path -LiteralPath $wsPath)){throw "Import API said complete but .ws file does not exist: $wsPath"}
   $importMethod=[string]$importStatus.result.parts[0].importMethod
-  if($importMethod -ne 'LoadPart-DXF-GEOMETRY'){throw ('API import did not use the verified exact-path DXF loader: '+$importMethod)}
+  if($importMethod -ne 'AddPartImport-DXF-GEOMETRY'){throw ('API import did not use the verified AddPartImport DXF loader: '+$importMethod)}
   $workerVersionImport=[string]$importStatus.workerVersion
 
   $autoBody=@{
