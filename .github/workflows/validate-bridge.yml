@@ -26,6 +26,7 @@ jobs:
             'tests/test-sigmanest-com-mock.ps1',
             'tests/test-sigmanest-real.ps1',
             'tests/test-sigmanest-adapter-real.ps1',
+            'tests/test-sigmanest-mixed-real.ps1',
             'tests/test-sigmanest-http-e2e.ps1',
             'tests/run-sigmanest-release-gate.ps1'
           )
