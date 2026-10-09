@@ -1047,7 +1047,7 @@ function Invoke-SigmaNestImportGeometry($Request){
     }
     if($queued.Count -eq 0){throw 'No geometry was found to import.'}
     $phase='COMMIT_IMPORTED_PARTS'
-    $app.CreatePartsListForNewPartsInWS()
+    [void]$app.CreatePartsListForNewPartsInWS()
     $after=SN-Parts-Count $app
     if($after -lt ($before+$queued.Count)){throw ('SigmaNEST committed '+($after-$before)+' part(s) but '+$queued.Count+' were requested.')}
     $phase='APPLY_CL_PART_DATA'
@@ -1190,7 +1190,7 @@ function Invoke-SigmaNestAutoTask($Request){
     $app=New-Object -ComObject SigmaNEST.SNApp
     if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
     $phase='LOAD_WORKSPACE'
-    $app.LoadWorkSpaceFile([string]$wsPath)
+    [void]$app.LoadWorkSpaceFile([string]$wsPath)
     $phase='APPLY_CL_PART_DATA'
     $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName ([string]$Request.jobName)
 
@@ -1198,7 +1198,7 @@ function Invoke-SigmaNestAutoTask($Request){
     # task objects that SigmaNEST AutoTask expects. Build the TasksList from the
     # imported workspace first, then let AutoTask organize/nest those tasks.
     $phase='CREATE_TASKS_FOR_IMPORTED_PARTS'
-    $app.CreateTasksListForNewPartsInWS()
+    [void]$app.CreateTasksListForNewPartsInWS()
     Start-Sleep -Milliseconds 500
     $taskCountBefore=0
     try{$taskCountBefore=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
@@ -1206,11 +1206,11 @@ function Invoke-SigmaNestAutoTask($Request){
       throw 'SigmaNEST could not create TasksList entries from the imported workspace parts.'
     }
     # Force the visible SigmaNEST UI to rebuild its tree before AutoTask.
-    try{$app.RefreshTreeView()}catch{}
-    try{$app.Redraw()}catch{}
+    try{[void]$app.RefreshTreeView()}catch{}
+    try{[void]$app.Redraw()}catch{}
 
     $phase='AUTO_TASK'
-    $app.AutoTask()
+    [void]$app.AutoTask()
     Start-Sleep -Milliseconds 1500
     $taskCount=0
     try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
@@ -1227,8 +1227,8 @@ function Invoke-SigmaNestAutoTask($Request){
     # Refresh the existing SigmaNEST UI without reloading the workspace. Reloading
     # here can invalidate Part Parameters windows; tree refresh is sufficient to
     # expose the newly-created tasks.
-    try{$app.RefreshTreeView()}catch{}
-    try{$app.Redraw()}catch{}
+    try{[void]$app.RefreshTreeView()}catch{}
+    try{[void]$app.Redraw()}catch{}
     $ok=($taskData.warnings.Count -eq 0)
     return [pscustomobject]@{
       ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
@@ -1304,7 +1304,7 @@ function Invoke-SigmaNestBuild($Request){
       throw 'No geometry was queued for SigmaNEST import.'
     }
 
-    $phase='COMMIT_IMPORTED_PARTS';$app.CreatePartsListForNewPartsInWS()
+    $phase='COMMIT_IMPORTED_PARTS';[void]$app.CreatePartsListForNewPartsInWS()
     $afterParts=SN-Parts-Count $app
     if($afterParts -lt ($beforeParts+$queued.Count)){
       throw ('SigmaNEST committed '+($afterParts-$beforeParts)+' part(s) but '+$queued.Count+' part(s) were requested for import.')
@@ -1333,7 +1333,7 @@ function Invoke-SigmaNestBuild($Request){
       throw ('SigmaNEST imported '+($afterParts-$beforeParts)+' part(s), but the automatic .ws save did not produce a file: '+$wsPath+'. '+($saveErrors -join ' | '))
     }
 
-    $phase='CREATE_TASKS';$app.CreateTasksListForNewPartsInWS()
+    $phase='CREATE_TASKS';[void]$app.CreateTasksListForNewPartsInWS()
     # Save again after the task list exists so the workspace remains resumable
     # if a later task attribute or quantity update fails.
     $phase='SAVE_TASK_CHECKPOINT'
@@ -1351,7 +1351,7 @@ function Invoke-SigmaNestBuild($Request){
     $phase='APPLY_TASK_QUANTITIES'
     SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='SAVE_WS';$app.SaveWorkSpaceFile([string]$wsPath)
-    try{$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{$app.RefreshTreeView()}catch{};try{$app.Redraw()}catch{}
+    try{[void]$app.LoadWorkSpaceFile([string]$wsPath)}catch{};try{[void]$app.RefreshTreeView()}catch{};try{[void]$app.Redraw()}catch{}
     return [pscustomobject]@{ok=$true;creatorVersion='DIRECT-COM-2.14.0';phase='COMPLETE';wsPath=$wsPath;parts=$created;partCount=$created.Count;message=('SigmaNEST WS created: '+$wsPath)}
   }catch{
     $checkpointExists=$false
