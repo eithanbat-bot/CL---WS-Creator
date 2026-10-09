@@ -14,7 +14,7 @@ This runs static architecture/release checks and the deterministic COM mock. Git
 
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\tests\run-sigmanest-release-gate.ps1" -RealCom
 
-This creates a temporary workspace from the selected DXF, imports it through SigmaNEST's automation interface, applies the CL values, creates tasks, applies batch/order labels and reload-verifies the saved result. It deletes its temporary workspace after the check.
+This runs a real single-DXF import and a mixed DXF+PRS import through SigmaNEST, applies the CL values, creates tasks, applies batch/order labels and reload-verifies the saved results. The mixed-source harness retains its diagnostic workspace in TEMP.
 
 By default the test DXF is `Y:\AutoCAD\Hino old\Hino 300\Rear Bodies\SBV\2023 (HSW) SBV Hino 300 816 Body\Dxf Files\PC-2A.DXF`. Override it with `-DxfPath "Y:\path\to\another-part.DXF"` and optionally pass `-TestQty`, `-TestMaterial`, `-TestThicknessMm` and `-BatchMultiplier`.
 
