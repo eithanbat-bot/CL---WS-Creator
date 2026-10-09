@@ -162,9 +162,12 @@ New-Item -ItemType Directory -Path $BridgeDir -Force|Out-Null
 $Launcher=Join-Path $Root 'Start Bridge Fixed.bat'
 function Update-Launcher([string]$Destination){
   try{
+    # Fetch a unique URL each run so CDN caching cannot preserve a stale
+    # bootstrap launcher after a bridge/updater repair.
+    $cacheBust=[Guid]::NewGuid().ToString('N')
     $urls=@(
-      "https://raw.githubusercontent.com/$Repo/$Branch/Start%20Bridge%20Fixed.bat",
-      "https://github.com/$Repo/raw/refs/heads/$Branch/Start%20Bridge%20Fixed.bat"
+      "https://raw.githubusercontent.com/$Repo/$Branch/Start%20Bridge%20Fixed.bat?cb=$cacheBust",
+      "https://github.com/$Repo/raw/refs/heads/$Branch/Start%20Bridge%20Fixed.bat?cb=$cacheBust"
     )
     $tmp=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-launcher-'+[Guid]::NewGuid().ToString('N')+'.bat')
     foreach($u in $urls){
