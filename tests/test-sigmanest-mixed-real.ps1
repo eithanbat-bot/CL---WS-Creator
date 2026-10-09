@@ -11,7 +11,7 @@ $job='CLWS-MIX-'+[Guid]::NewGuid().ToString('N').Substring(0,8)
 $wsPath=Join-Path $outDir ($job+'.ws')
 $parts=@(
   [pscustomobject]@{part='PC-2A';qty=4;sigmaMaterial='MS';thicknessMm=4;sourcePath=$DxfPath;sourceType='DXF';matchType='SELFTEST';batchMultiplier=4;taskBatches=@();sourceSheets=@('DXF');sourceRows=@()},
-  [pscustomobject]@{part='HSWU2 100';qty=2;sigmaMaterial='MS';thicknessMm=4;sourcePath=$PrsPath;sourceType='PRS';matchType='SELFTEST';batchMultiplier=4;taskBatches=@();sourceSheets=@('PRS');sourceRows=@()}
+  [pscustomobject]@{part='HSWU2 100';qty=2;sigmaMaterial='MS';thicknessMm=8;sourcePath=$PrsPath;sourceType='PRS';matchType='SELFTEST';batchMultiplier=4;taskBatches=@();sourceSheets=@('PRS');sourceRows=@()}
 )
 $importResult=$null;$autoResult=$null;$verifyAuto=$null;$verify=$null
 try{
@@ -31,7 +31,17 @@ try{
   $partCount=SN-Parts-Count $verify
   $taskCount=SN-Scalar-Int -value $verify.TasksList.Count -default 0
   if($partCount -ne 2){throw ('Mixed final workspace expected 2 parts, got '+$partCount)}
-  if($taskCount -lt 1){throw ('Mixed final workspace has no tasks.')}
+  if($taskCount -lt 2){throw ('Mixed final workspace should create separate 4mm and 8mm tasks; found '+$taskCount)}
+  $taskData=@($autoResult.taskData)
+  if($taskData.Count -ne 2){throw ('Expected two separate material/thickness task records; found '+$taskData.Count)}
+  $expectedLabels=@('01 | MS | 4mm','02 | MS | 8mm')
+  for($ti=0;$ti -lt 2;$ti++){
+    if([string]$taskData[$ti].taskName -ne $expectedLabels[$ti]){throw ('Unexpected mixed task label at '+($ti+1)+': '+[string]$taskData[$ti].taskName)}
+    if(-not [bool]$taskData[$ti].labelApplied){throw ('Task label write was not verified for '+$expectedLabels[$ti])}
+    if(-not [bool]$taskData[$ti].batchApplied){throw ('Task batch multiplier write was not verified for '+$expectedLabels[$ti])}
+    if((SN-Scalar-Int -value $taskData[$ti].batchMultiplier -default 0) -ne 4){throw ('Task batch multiplier should be 4 for '+$expectedLabels[$ti])}
+    if((SN-Scalar-Int -value $taskData[$ti].partCount -default 0) -ne 1){throw ('Each thickness task should contain one part: '+$expectedLabels[$ti])}
+  }
   $savedParts=@()
   foreach($rp in $parts){
     $found=SN-Find-WorkspacePartExact -app $verify -targetName $rp.part -sourcePath $rp.sourcePath -usedIndices @()
