@@ -269,7 +269,9 @@ try{
     $local=Join-Path $BridgeDir $entry.relative
     $stage=[string]$entry.ValidatedStage
     if((Get-Hash $stage) -ne (Get-Hash $local)){
-      $install+=[pscustomobject]@{Stage=[string]$entry.source;Local=$local;Relative=$entry.relative}
+      # Install from the separately validated copy, not from the extracted
+      # repository tree. The archive tree can be unavailable during replacement.
+      $install+=[pscustomobject]@{Stage=[string]$entry.ValidatedStage;Local=$local;Relative=$entry.relative}
     }
   }
 
@@ -277,23 +279,27 @@ try{
   $manifestInstall=$false
   if(Test-Path -LiteralPath $localManifest){
     $remoteManifest=Join-Path $archiveRoot[0].FullName 'manifest.xml'
+    $manifestStage=Join-Path $tmpRoot 'validate-manifest.xml'
     Say 'Checking local manifest.xml from the downloaded archive...'
     if(-not(Test-Path -LiteralPath $remoteManifest)){throw 'GitHub archive does not contain manifest.xml.'}
+    # Keep manifest installation on the same verified staging path as runtime
+    # files. Never point the final install phase at the extract tree.
+    Copy-Item -LiteralPath $remoteManifest -Destination $manifestStage -Force
     $buildId=($remoteVersion -replace '[^A-Za-z0-9]','')
-    $manifestText=Get-Content -LiteralPath $remoteManifest -Raw -Encoding UTF8
+    $manifestText=Get-Content -LiteralPath $manifestStage -Raw -Encoding UTF8
     if($manifestText.Contains('__BUILD__')){
       $manifestText=$manifestText.Replace('__BUILD__',$buildId)
-      Set-Content -LiteralPath $remoteManifest -Value $manifestText -Encoding UTF8
+      Set-Content -LiteralPath $manifestStage -Value $manifestText -Encoding UTF8
     }
-    if(-not(Test-Xml $remoteManifest)){throw 'Downloaded manifest.xml failed XML validation.'}
-    if((Get-Hash $remoteManifest) -ne (Get-Hash $localManifest)){$manifestInstall=$true}
+    if(-not(Test-Xml $manifestStage)){throw 'Downloaded manifest.xml failed XML validation.'}
+    if((Get-Hash $manifestStage) -ne (Get-Hash $localManifest)){$manifestInstall=$true}
   }
 
   Stop-CreatorProcesses -ServerPath $Server
   Stop-CreatorPortOwners -Port $Port -ServerPath $Server | Out-Null
 
   $changed=@($install)
-  if($manifestInstall){$changed+=[pscustomobject]@{Stage=$remoteManifest;Local=$localManifest;Relative='manifest.xml'}}
+  if($manifestInstall){$changed+=[pscustomobject]@{Stage=$manifestStage;Local=$localManifest;Relative='manifest.xml'}}
 
   if($changed.Count -gt 0){
     if(Test-Path -LiteralPath $BackupDir){Remove-Item -LiteralPath $BackupDir -Recurse -Force}
