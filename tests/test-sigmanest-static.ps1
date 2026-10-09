@@ -19,7 +19,14 @@ $matcher=$server.Substring($matcherStart,$matcherEnd-$matcherStart)
 Assert ($matcher.Contains('$exactCandidates=if($dxfExact.Count -gt 0){$dxfExact}else{$prsExact}')) 'Exact matching can let PRS override an available DXF.'
 Assert ($matcher.Contains('$embeddedCandidates=if($dxfEmbedded.Count -gt 0){$dxfEmbedded}else{$prsEmbedded}')) 'Embedded matching can let PRS override an available DXF.'
 Assert ($matcher.Contains('$variationCandidates=if($dxfVars.Count -gt 0){$dxfVars}else{$prsVars}')) 'Variation matching can let PRS override an available DXF.'
-Assert ($serverVersion -eq '2.23.0') "Unexpected bridge version: $serverVersion"
+$shardStart=$server.IndexOf('function Get-DxfShardCandidates(')
+$shardEnd=$server.IndexOf('function Is-EmbeddedMatch', $shardStart)
+Assert ($shardStart -ge 0 -and $shardEnd -gt $shardStart) 'DXF shard candidate reader is missing.'
+$shardReader=$server.Substring($shardStart,$shardEnd-$shardStart)
+Assert ($shardReader.Contains('$columns=$line.Split([char]9)')) 'DXF shard reader does not split TSV columns correctly.'
+Assert ($shardReader.Contains('$file=[string]$columns[1]')) 'DXF shard reader does not use the File column.'
+Assert (-not $shardReader.Contains('$file=$line.Substring($tab+1)')) 'DXF shard reader still appends timestamp/length to the file path.'
+Assert ($serverVersion -eq '2.24.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
