@@ -191,9 +191,15 @@ function Update-Launcher([string]$Destination){
 
 Say "Installed bridge version: $(Get-Version $Server)"
 $tmpRoot=Join-Path ([IO.Path]::GetTempPath()) ('clwsc-update-'+[Guid]::NewGuid().ToString('N'))
+# Keep validated install stages outside the temporary archive tree. Some
+# workstation cleanup/launcher paths can remove TEMP content while the bridge
+# process is being stopped; the validated staged copies must survive until the
+# atomic install/rollback sequence is finished.
+$stageRoot=Join-Path $BridgeDir ('_update-stage-'+[Guid]::NewGuid().ToString('N'))
 
 try{
   New-Item -ItemType Directory -Path $tmpRoot -Force|Out-Null
+  New-Item -ItemType Directory -Path $stageRoot -Force|Out-Null
   Say 'Checking GitHub for the newest bridge runtime...'
     # Download one repository archive instead of making a separate API request
   # for every bridge file. This avoids GitHub API rate limits/403 responses.
@@ -247,7 +253,7 @@ try{
   })
 
   foreach($entry in $entries){
-    $validationStage=Join-Path $tmpRoot ('validate-'+$entry.relative)
+    $validationStage=Join-Path $stageRoot ('validate-'+$entry.relative)
     Copy-Item -LiteralPath $entry.source -Destination $validationStage -Force
     $entry | Add-Member -MemberType NoteProperty -Name ValidatedStage -Value $validationStage -Force
     $ext=[IO.Path]::GetExtension($entry.relative).ToLowerInvariant()
@@ -279,7 +285,7 @@ try{
   $manifestInstall=$false
   if(Test-Path -LiteralPath $localManifest){
     $remoteManifest=Join-Path $archiveRoot[0].FullName 'manifest.xml'
-    $manifestStage=Join-Path $tmpRoot 'validate-manifest.xml'
+    $manifestStage=Join-Path $stageRoot 'validate-manifest.xml'
     Say 'Checking local manifest.xml from the downloaded archive...'
     if(-not(Test-Path -LiteralPath $remoteManifest)){throw 'GitHub archive does not contain manifest.xml.'}
     # Keep manifest installation on the same verified staging path as runtime
@@ -344,6 +350,7 @@ try{
   Say "Could not update ($($_.Exception.Message)). Using the installed bridge copy." 'Yellow'
 }finally{
   Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Update-Launcher -Destination $Launcher
