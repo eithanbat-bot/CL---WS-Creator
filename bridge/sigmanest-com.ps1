@@ -356,7 +356,7 @@ function SN-Make-CLLinkKey($jobName,$rp){
     return $fallback.Substring(0,[math]::Min(40,$fallback.Length))
   }
 }
-function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[string]$linkFile=''){
+function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[string]$linkFile='',[switch]$DeferBatchToTasks){
   $updated=@()
   $usedIndices=@()
   foreach($rp in @($requestParts)){
@@ -422,12 +422,18 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
     # WS and can be read by AutoTask without consulting the CL again.
     $batch=SN-Scalar-Int -value $rp.batchMultiplier -default 1
     if($batch -lt 1){$batch=1}
-    $batchInfo=SN-Set-PartField -partObj $partObj -names @('BatchQty','BatchQuantity','BatchMultiplier','Batch') -value $batch -expectedInt $batch
+    # SigmaNEST multiplies QtyToNest while creating TasksList when BatchQty is
+    # already >1 on the PartsList item. During Import Geometry create tasks at
+    # x1 first, then write the CL multiplier to the saved task/part entries.
+    $partBatch=$batch
+    if($DeferBatchToTasks){$partBatch=1}
+    $batchInfo=SN-Set-PartField -partObj $partObj -names @('BatchQty','BatchQuantity','BatchMultiplier','Batch') -value $partBatch -expectedInt $partBatch
     if(-not $batchInfo){
-      throw ('CL batch multiplier x'+$batch+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
+      throw ('SigmaNEST PartsList BatchQty could not be set and verified as '+$partBatch+' for CL part "'+$targetName+'".')
     }
     $row.batchMultiplier=$batch
-    $row.batchProperty=[string]$batchInfo.path
+    $row.partBatchQty=$partBatch
+    $row.batchProperty=[string]$(if($DeferBatchToTasks){'TASKS_LIST.PartsList.BatchQty'}else{$batchInfo.path})
 
     # SigmaNEST 11.4 does not expose a writable part Description on the tested
     # DXF parts. Keep the original CL description in the linked CL data record.
@@ -545,10 +551,9 @@ function SN-Verify-WorkspaceCLData($app,$requestParts){
     # Verify the actual Part Parameters quantity field, not a task-only batch field.
     $q=SN-Read-PartField -partObj $found.part -aliases @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
     if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
-    $batch=SN-Scalar-Int -value $rp.batchMultiplier -default 1
-    if($batch -lt 1){$batch=1}
-    $b=SN-Read-PartField -partObj $found.part -aliases @('BatchQty','BatchQuantity','BatchMultiplier','Batch') -expectedInt $batch
-    if($null -eq $b){throw ('Post-save verification failed for "'+$target+'": BatchQty multiplier is not '+$batch+'.')}
+    # BatchQty is stored on the Task/TaskPart entries, not the PartsList during
+    # geometry import: SigmaNEST multiplies QtyToNest when TasksList is created.
+    # Verify the persisted task batch separately with SN-Verify-WorkspaceTaskData.
   }
   return $true
 }
