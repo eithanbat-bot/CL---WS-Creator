@@ -374,6 +374,7 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
     $thickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
     $row=[ordered]@{
       part=$targetName
+      linkKey=(SN-Make-CLLinkKey -jobName $jobName -rp $rp)
       index=(SN-Scalar-Int -value $found.index -default -1)
       qty=$qty
       material=$material
