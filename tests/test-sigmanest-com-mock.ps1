@@ -50,7 +50,7 @@ Assert ($part.Material -eq 'MS') ("Material was not changed to the mapped CL mat
 Assert ([double]$part.Thickness -eq 8.0) ("Thickness was not changed to 8mm; got $($part.Thickness).")
 Assert ([int]$updated[0].qty -eq 4) ("Reported per-vehicle quantity was not 4; got $($updated[0].qty).")
 Assert ([int]$updated[0].batchMultiplier -eq 4) ("Reported batch multiplier was not 4; got $($updated[0].batchMultiplier).")
-Assert ($updated[0].batchProperty) 'Import did not record the verified BatchQty property.'
+Assert (-not [string]::IsNullOrWhiteSpace([string]$updated[0].batchProperty)) 'Import did not record the verified BatchQty property.'
 
 [void](SN-Verify-WorkspaceCLData -app $app -requestParts @($requestPart))
 $snapshot=@(SN-Read-WorkspaceProductionData -app $app)
