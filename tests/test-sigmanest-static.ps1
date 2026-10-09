@@ -11,6 +11,7 @@ function Assert([bool]$condition,[string]$message){if(-not $condition){throw $me
 $serverVersion=[regex]::Match($server,'(?m)^\s*\$BRIDGE_VERSION\s*=\s*''([^'']+)''').Groups[1].Value
 $workerVersion=[regex]::Match($worker,'(?m)^\s*\$WorkerVersion\s*=\s*''([^'']+)''').Groups[1].Value
 Assert ($serverVersion -eq $workerVersion) "Bridge/worker version mismatch: $serverVersion vs $workerVersion"
+Assert ($server.Contains("workerVersion='$serverVersion'")) 'Initial worker status does not report the current bridge version.'
 Assert ($serverVersion -eq '2.22.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
