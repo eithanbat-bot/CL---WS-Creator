@@ -1286,6 +1286,9 @@ function SN-Read-WorkspaceProductionData($app){
       materialProperty=[string]$(if($mf){$mf.path}else{''})
       thicknessProperty=[string]$(if($tf){$tf.path}else{''})
       batchProperty=[string]$(if($bf){$bf.path}else{''})
+      status='READY'
+      statusLabel='VERIFIED IN SAVED WS'
+      reviewReason=''
     }
   }
   return @($records)
