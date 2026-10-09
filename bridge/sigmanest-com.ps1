@@ -1199,15 +1199,26 @@ function SN-Set-TaskNameAndBatch($app,$requestParts){
 }
 
 function Invoke-SigmaNestAutoTask($Request){
-  $phase='START';$app=$null
+  $phase='START';$app=$null;$automation=$null
   try{
     if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'SigmaNEST COM requires STA.'}
     $wsPath=[IO.Path]::GetFullPath([string]$Request.wsPath)
     if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST WS not found: '+$wsPath)}
+    # SNApp.LoadWorkSpaceFile can merge the saved PartsList into the currently
+    # open SigmaNEST workspace instead of replacing it. Import Geometry leaves
+    # the new job active, so loading it again created duplicate part entries
+    # and broke task mapping. Start from a clean workspace before opening the
+    # exact saved job that this AutoTask request names.
+    $phase='RESET_WORKSPACE'
+    $automation=New-Object -ComObject SigmaNEST.SNAutomation
+    if($null -eq $automation){throw 'SigmaNEST.SNAutomation returned null.'}
+    [void]$automation.FileNew()
+    Start-Sleep -Milliseconds 250
     $app=New-Object -ComObject SigmaNEST.SNApp
     if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
     $phase='LOAD_WORKSPACE'
     [void]$app.LoadWorkSpaceFile([string]$wsPath)
+    Start-Sleep -Milliseconds 250
     $phase='APPLY_CL_PART_DATA'
     $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName ([string]$Request.jobName)
 
@@ -1262,7 +1273,10 @@ function Invoke-SigmaNestAutoTask($Request){
       taskData=@();warnings=@($_.Exception.Message)
       message=('AutoTask failed at '+$phase+': '+$_.Exception.Message)
     }
-  }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
+  }finally{
+    if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}
+    if($automation){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($automation)}catch{}}
+  }
 }
 
 function Invoke-SigmaNestBuild($Request){
