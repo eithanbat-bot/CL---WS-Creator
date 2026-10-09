@@ -32,7 +32,7 @@ $shardReader=$server.Substring($shardStart,$shardEnd-$shardStart)
 Assert ($shardReader.Contains('$columns=$line.Split([char]9)')) 'DXF shard reader does not split TSV columns correctly.'
 Assert ($shardReader.Contains('$file=[string]$columns[1]')) 'DXF shard reader does not use the File column.'
 Assert (-not $shardReader.Contains('$file=$line.Substring($tab+1)')) 'DXF shard reader still appends timestamp/length to the file path.'
-Assert ($serverVersion -eq '2.32.1') "Unexpected bridge version: $serverVersion"
+Assert ($serverVersion -eq '2.32.2') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
@@ -74,7 +74,7 @@ Assert ($com.Contains('$multis+=[int]$rp.batchMultiplier')) 'Task batch logic do
 Assert ($com.Contains('[void]$automation.AddPartImport([string]$x.sourcePath,[double]1.0,[double]1.0,0,0,0)')) 'DXF import does not use SigmaNEST AddPartImport.'
 Assert ($com.Contains("importMethod=`$(if(`$sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})")) 'Import result does not distinguish DXF and PRS loading.'
 Assert ($com.Contains('[void]$automation.ResetSigmaNEST()')) 'Import/AutoTask does not clear stale SigmaNEST workspace rows before loading.'
-Assert ($com.Contains("SN-Save-WorkspaceVerified -app `$app -wsPath `$wsPath -label 'CL-data geometry import'")) 'CL-data import does not save the populated SNApp workspace.'
+Assert ($com.Contains("SN-Save-WorkspaceVerified -app `$app -wsPath `$wsPath -label 'CL-data PartsList and TasksList import'")) 'CL-data import does not save the populated SNApp workspace.'
 $autoBodyStart=$com.IndexOf('function Invoke-SigmaNestAutoTask(')
 $autoBodyEnd=$com.IndexOf('function Invoke-SigmaNestBuild(', $autoBodyStart)
 Assert ($autoBodyStart -ge 0 -and $autoBodyEnd -gt $autoBodyStart) 'AutoTask method body is missing.'
@@ -84,14 +84,15 @@ Assert ($autoBody.IndexOf('[void]$automation.FileNew()') -lt $autoBody.IndexOf('
 Assert ($autoBody.Contains('SN-Read-WorkspaceProductionData -app $app')) 'AutoTask does not snapshot production values from the saved WS.'
 Assert ($autoBody.Contains('SN-Set-TaskNameAndBatch -app $app -workspaceParts $workspaceParts')) 'AutoTask does not use batch multipliers read from the saved WS.'
 Assert (-not $autoBody.Contains('SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts')) 'AutoTask is still overwriting saved WS values from an Excel/CL request.'
-Assert (-not $autoBody.Contains('SN-Set-TaskPartQuantity')) 'AutoTask must not reapply CL quantities after AutoTask.'
-Assert (-not $autoBody.Contains('SN-Set-TaskMaterialAndThickness')) 'AutoTask must not reapply CL material/thickness after AutoTask.'
+Assert (-not $autoBody.Contains('CreateTasksListForNewPartsInWS()')) 'AutoTask must use the saved TasksList and must not recreate it.'
+Assert (-not $autoBody.Contains('SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts')) 'AutoTask must never reapply CL payload to PartsList.'
+Assert ($autoBody.Contains('SN-Apply-TaskCLData -app $app -requestParts $workspaceParts')) 'AutoTask must restore/verify only production data read from the saved WS after AutoTask.'
 Assert ($taskpane.Contains('function normalizeParts(parts)')) 'Task pane null-part guard missing.'
 Assert ($taskpane.Contains('sole source of material, thickness, quantity and batch multiplier')) 'AutoTask task pane must explain that the saved WS is its sole production-data source.'
 Assert (-not $taskpane.Substring($taskpane.IndexOf('async function autoTaskOrder()'),$taskpane.IndexOf('async function checkBridge(')-$taskpane.IndexOf('async function autoTaskOrder()')).Contains('readCL()')) 'AutoTask must not reread or resend CL data.'
 Assert ($taskpane.Contains("autoTaskOrder').disabled=!currentWsPath")) 'AutoTask must remain available from a saved WS without a loaded CL.'
 
-# Import must remain task-free; AutoTask owns task creation.
+# Import must prepare and verify CL production data on both PartsList and TasksList; AutoTask only runs later.
 $importStart=$com.IndexOf('function Invoke-SigmaNestImportGeometry')
 $autoStart=$com.IndexOf('function Invoke-SigmaNestAutoTask')
 $importBody=$com.Substring($importStart,$autoStart-$importStart)
@@ -99,8 +100,11 @@ Assert ($importBody.Contains('$automation.AddPartImport([string]$x.sourcePath'))
 Assert ($importBody.Contains("importMethod=`$(if(`$sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})")) 'Import Geometry reports incorrect geometry source methods.'
 Assert ($importBody.Contains('$app.LoadPart([string]$x.sourcePath)')) 'Import Geometry does not load explicit PRS sources.'
 Assert (-not $importBody.Contains('LoadPart-DXF-GEOMETRY')) 'Import Geometry still reports the unverified DXF LoadPart route.'
-Assert (-not $importBody.Contains("CreateTasksListForNewPartsInWS()")) 'Import Geometry must not create TasksList entries.'
-Assert (-not $importBody.Contains("AutoTask()")) 'Import Geometry must not run AutoTask.'
-Assert ($importBody.Contains('[void]$app.CreatePartsListForNewPartsInWS()')) 'Import Geometry must suppress the PartsList-creation return value.'
+Assert ($importBody.Contains('CreateTasksListForNewPartsInWS()')) 'Import Geometry must prepare a TasksList to persist CL batch metadata before AutoTask.'
+Assert (-not $importBody.Contains('AutoTask()')) 'Import Geometry must prepare the workspace but must not run AutoTask.'
+Assert ($importBody.Contains('-DeferBatchToTasks')) 'Import Geometry must keep the PartsList BatchQty at x1 until TasksList creation.'
+Assert ($importBody.Contains('SN-Apply-TaskCLData -app $app -requestParts $queued')) 'Import Geometry must apply the batch multiplier and CL data to TasksList before saving.'
+Assert ($importBody.Contains('SN-Verify-WorkspaceTaskData -app $app -requestParts $queued')) 'Import Geometry must verify the saved task-side CL data before enabling AutoTask.'
+Assert ($importBody.Contains('SN-Verify-Saved-WorkspaceCLData')) 'Import Geometry must verify production values after reopening the saved workspace.'
 
 Write-Host ("SigmaNEST static release gate: PASS (bridge $serverVersion)") -ForegroundColor Green
