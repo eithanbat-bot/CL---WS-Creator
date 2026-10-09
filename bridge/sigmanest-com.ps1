@@ -1221,6 +1221,20 @@ function Invoke-SigmaNestImportGeometry($Request){
     if($automation){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($automation)}catch{}}
   }
 }
+function SN-Read-PreferredPartField($partObj,[string[]]$aliases){
+  if($null -eq $partObj){return $null}
+  # Read canonical fields in the supplied priority order before doing broad
+  # alias discovery. Otherwise a stale NumberToNest/MaterialDescription alias
+  # can sort before the actual QtyToNest/Material property and win by accident.
+  foreach($name in @($aliases)){
+    try{
+      $value=$partObj.$name
+      if($null -ne $value){return [pscustomobject]@{path=('ROOT.'+$name);value=$value}}
+    }catch{}
+  }
+  return (SN-Read-PartField -partObj $partObj -aliases $aliases)
+}
+
 function SN-Read-WorkspaceProductionData($app){
   $partCount=SN-Parts-Count $app
   if($partCount -le 0){throw 'The saved WS contains no SigmaNEST PartsList entries.'}
@@ -1237,21 +1251,21 @@ function SN-Read-WorkspaceProductionData($app){
     if($seen.ContainsKey($key)){throw ('Saved WS contains duplicate part identity "'+$partName+'"; AutoTask cannot safely assign one batch multiplier to both rows.')}
     $seen[$key]=$true
 
-    $mf=SN-Read-PartField -partObj $partObj -aliases @('Material','MaterialName','PartMaterial','MaterialDescription','MaterialType','Mat','MatName')
+    $mf=SN-Read-PreferredPartField -partObj $partObj -aliases @('Material','MaterialName','PartMaterial','MaterialDescription','MaterialType','Mat','MatName')
     $material=if($mf){[string]$mf.value}else{''}
     if([string]::IsNullOrWhiteSpace($material)){throw ('Saved WS part "'+$partName+'" has no readable material. Rerun Import Geometry and verify the CL material before tasking.')}
 
-    $tf=SN-Read-PartField -partObj $partObj -aliases @('Thickness','SheetThickness','MaterialThickness','ThicknessValue','PartThickness','Thk','Thick')
+    $tf=SN-Read-PreferredPartField -partObj $partObj -aliases @('Thickness','SheetThickness','MaterialThickness','ThicknessValue','PartThickness','Thk','Thick')
     $thickness=if($tf){SN-Scalar-Number -value $tf.value -default ([double]::NaN)}else{[double]::NaN}
     if([double]::IsNaN([double]$thickness) -or $thickness -le 0){throw ('Saved WS part "'+$partName+'" has no valid thickness. Rerun Import Geometry and verify the CL thickness before tasking.')}
 
-    $qf=SN-Read-PartField -partObj $partObj -aliases @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity')
+    $qf=SN-Read-PreferredPartField -partObj $partObj -aliases @('QtyToNest','NumberToNest','NumberToLoad','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity')
     $qty=if($qf){SN-Scalar-Int -value $qf.value -default 0}else{0}
     if($qty -lt 1){throw ('Saved WS part "'+$partName+'" has no valid QtyToNest value. Rerun Import Geometry before tasking.')}
 
     # Import Geometry writes BatchQty onto each saved part; never substitute a
     # worksheet value at this stage.
-    $bf=SN-Read-PartField -partObj $partObj -aliases @('BatchQty','BatchQuantity','BatchMultiplier','Batch')
+    $bf=SN-Read-PreferredPartField -partObj $partObj -aliases @('BatchQty','BatchQuantity','BatchMultiplier','Batch')
     $batch=if($bf){SN-Scalar-Int -value $bf.value -default 0}else{0}
     if($batch -lt 1){throw ('Saved WS part "'+$partName+'" has no valid BatchQty multiplier. Rerun Import Geometry and verify the batch value before tasking.')}
 
