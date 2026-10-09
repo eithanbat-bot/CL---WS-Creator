@@ -32,7 +32,7 @@ $shardReader=$server.Substring($shardStart,$shardEnd-$shardStart)
 Assert ($shardReader.Contains('$columns=$line.Split([char]9)')) 'DXF shard reader does not split TSV columns correctly.'
 Assert ($shardReader.Contains('$file=[string]$columns[1]')) 'DXF shard reader does not use the File column.'
 Assert (-not $shardReader.Contains('$file=$line.Substring($tab+1)')) 'DXF shard reader still appends timestamp/length to the file path.'
-Assert ($serverVersion -eq '2.27.0') "Unexpected bridge version: $serverVersion"
+Assert ($serverVersion -eq '2.28.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
@@ -66,6 +66,12 @@ Assert ($bat.Contains('?cb=') -and $bat.Contains('$cb')) 'Bootstrap does not cac
 Assert ($com.Contains("function SN-Queue-Geometry(`$app,[string]`$sourcePath,[string]`$sourceType,`$clData=`$null,`$automation=`$null)")) 'Geometry queue does not accept the workspace automation object.'
 Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
 Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
+$autoBodyStart=$com.IndexOf('function Invoke-SigmaNestAutoTask(')
+$autoBodyEnd=$com.IndexOf('function Invoke-SigmaNestBuild(', $autoBodyStart)
+Assert ($autoBodyStart -ge 0 -and $autoBodyEnd -gt $autoBodyStart) 'AutoTask method body is missing.'
+$autoBody=$com.Substring($autoBodyStart,$autoBodyEnd-$autoBodyStart)
+Assert ($autoBody.Contains('[void]$automation.FileNew()')) 'AutoTask does not reset the existing SigmaNEST workspace before loading the saved job.'
+Assert ($autoBody.IndexOf('[void]$automation.FileNew()') -lt $autoBody.IndexOf('[void]$app.LoadWorkSpaceFile([string]$wsPath)')) 'AutoTask loads the saved job before clearing existing PartsList entries.'
 Assert ($taskpane.Contains('function normalizeParts(parts)')) 'Task pane null-part guard missing.'
 Assert ($taskpane.Contains("No valid CL parts are available for AutoTask")) 'Task pane AutoTask input guard missing.'
 
