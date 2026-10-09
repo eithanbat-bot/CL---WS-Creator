@@ -33,7 +33,7 @@ try{
   if(-not $importResult.ok){throw ('Import failed at '+$importResult.phase+': '+$importResult.error)}
   if([string]$importResult.parts[0].sourceType -ne 'DXF'){throw 'Import result did not report DXF as source type.'}
   if([string]$importResult.parts[0].sourcePath -ne $DxfPath){throw 'Import result path differs from the selected DXF.'}
-  if([string]$importResult.parts[0].importMethod -ne 'LoadPart-DXF-GEOMETRY'){throw ('Unexpected geometry method: '+[string]$importResult.parts[0].importMethod)}
+  if([string]$importResult.parts[0].importMethod -ne 'AddPartImport-DXF-GEOMETRY'){throw ('Unexpected geometry method: '+[string]$importResult.parts[0].importMethod)}
   $wsPath=[string]$importResult.wsPath
   if(-not(Test-Path -LiteralPath $wsPath)){throw 'DXF import did not create the new WS file.'}
 
