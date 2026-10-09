@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.20.0'
+$WorkerVersion='2.21.0'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
@@ -38,7 +38,20 @@ try{
   if($mode -eq 'AUTOTASK_ONLY'){
     $phase='AUTOTASK'
     Write-BuildStatus $statusFile ([ordered]@{jobId=[string]$request.jobId;state='RUNNING';phase=$phase;message='Applying CL part data, running AutoTask and applying batch/order labels.';workerVersion=$WorkerVersion;pid=$PID;started=$started.ToString('o');finished=$null;elapsedSeconds=((Get-Date).ToUniversalTime()-$started).TotalSeconds;result=$null;parts=@($request.reportParts);outputDir=[string]$request.outputDir;jobName=[string]$request.jobName;selectedSheets=@($request.selectedSheets)})
-    $data=Invoke-SigmaNestAutoTask -Request $request.autoTaskRequest
+    # SigmaNEST COM methods can emit non-result pipeline objects. Keep the
+    # AutoTask worker contract identical to the geometry-import contract:
+    # only the final structured result may reach the status/report layer.
+    $rawAutoTaskData=@(Invoke-SigmaNestAutoTask -Request $request.autoTaskRequest)
+    $autoTaskResults=@($rawAutoTaskData | Where-Object {
+      $null -ne $_ -and
+      $_.PSObject.Properties.Name -contains 'ok' -and
+      $_.PSObject.Properties.Name -contains 'phase'
+    })
+    if($autoTaskResults.Count -eq 0){
+      $types=@($rawAutoTaskData|ForEach-Object{try{$_.GetType().FullName}catch{'<unknown>'}})
+      throw ('AutoTask engine returned no structured result. Raw pipeline types: '+($types -join ', '))
+    }
+    $data=$autoTaskResults[-1]
   }else{
     $phase='PREPARE'
     Write-BuildStatus $statusFile ([ordered]@{jobId=[string]$request.jobId;state='RUNNING';phase=$phase;message='Matching CL parts and preparing the SigmaNEST geometry operation.';workerVersion=$WorkerVersion;pid=$PID;started=$started.ToString('o');finished=$null;elapsedSeconds=((Get-Date).ToUniversalTime()-$started).TotalSeconds;result=$null;parts=@($request.reportParts);jobName=[string]$request.jobName;selectedSheets=@($request.selectedSheets)})
