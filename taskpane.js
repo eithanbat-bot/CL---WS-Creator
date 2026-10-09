@@ -285,7 +285,7 @@ function updateCount(){
   $('sheetCount').textContent=n+' selected';
   $('preview').disabled=!clWorkbook||n===0;
   $('importGeometry').disabled=!clWorkbook||n===0;
-  $('autoTaskOrder').disabled=!clWorkbook||n===0||!currentWsPath;
+  $('autoTaskOrder').disabled=!currentWsPath;
   $('refreshSheets').disabled=!clWorkbook;
 }
 function parseCLFile(file){
