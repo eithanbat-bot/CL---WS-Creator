@@ -2,6 +2,8 @@
 
 Run these tests from the checked-out repository on the SigmaNEST workstation. No extra software installation is required beyond existing Windows PowerShell and SigmaNEST.
 
+**Before running `-RealCom` or `-HttpE2E`, save and close any working SigmaNEST job.** The COM harness uses `ResetSigmaNEST`/`FileNew` in the running SigmaNEST session, but it writes its test workspaces under the Windows TEMP folder and does not save over production `.ws` files.
+
 ## Local gates (no live SigmaNEST operations)
 
 Run from the repository root:
