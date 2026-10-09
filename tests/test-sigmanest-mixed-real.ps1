@@ -45,6 +45,5 @@ try{
   [pscustomobject]@{ok=$true;geometrySources='DXF+PRS';partCount=$partCount;taskCount=$taskCount;savedParts=$savedParts;taskData=$autoResult.taskData;workspaceBytes=(Get-Item -LiteralPath $wsPath).Length;timestamp=(Get-Date).ToString('o')}|ConvertTo-Json -Depth 10
 }finally{
   foreach($o in @($verify,$verifyAuto)){if($o){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($o)}catch{}}}
-  if(Test-Path -LiteralPath $wsPath){Remove-Item -LiteralPath $wsPath -Force -ErrorAction SilentlyContinue}
-  if(Test-Path -LiteralPath $outDir){Remove-Item -LiteralPath $outDir -Recurse -Force -ErrorAction SilentlyContinue}
+  Write-Host ('Mixed integration test workspace kept in TEMP for diagnosis: '+$wsPath)
 }
