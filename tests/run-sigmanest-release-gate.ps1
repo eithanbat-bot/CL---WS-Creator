@@ -14,7 +14,8 @@ $Root=Split-Path -Parent $PSScriptRoot
 
 $required=@(
   @{Name='Static release gate';Path=(Join-Path $PSScriptRoot 'test-sigmanest-static.ps1')},
-  @{Name='Deterministic COM mock';Path=(Join-Path $PSScriptRoot 'test-sigmanest-com-mock.ps1')}
+  @{Name='Deterministic COM mock';Path=(Join-Path $PSScriptRoot 'test-sigmanest-com-mock.ps1')},
+  @{Name='CL parser batch/data regression';Path=(Join-Path $PSScriptRoot 'test-cl-parser.ps1')}
 )
 foreach($test in $required){
   if(-not(Test-Path -LiteralPath $test.Path)){throw "Required test is missing: $($test.Path)"}
