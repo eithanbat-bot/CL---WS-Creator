@@ -41,7 +41,7 @@ Assert ($com -match '\$phase\s*=\s*''CREATE_TASKS_FOR_CL_DATA''') 'Import phase 
 Assert ($com -match '\$phase\s*=\s*''AUTO_TASK''') 'AutoTask phase missing.'
 Assert ($com.Contains('try{[void]$app.RefreshTreeView()}catch{}')) 'SigmaNEST tree refresh missing or return value is not suppressed.'
 Assert ($com.Contains('function SN-Set-QtyToNest')) 'Canonical SigmaNEST QtyToNest setter is missing.'
-Assert ($com.Contains("'BatchQty','BatchQuantity','BatchMultiplier','Batch'")) 'Import does not write a persisted BatchQty multiplier to the SigmaNEST PartsList.'
+Assert ($com.Contains("function SN-Apply-TaskCLData($app,$requestParts)")) 'Import is missing the CL TasksList data application step.'
 Assert ($com.Contains('function SN-Verify-WorkspaceTaskData($app,$requestParts)')) 'Import verification does not verify saved TasksList batch multipliers and production fields.'
 Assert ($com.Contains('function SN-Read-WorkspaceProductionData($app)')) 'AutoTask is missing the saved-WS production-data reader.'
 Assert ($com.Contains('effectiveBatchQuantity=')) 'CL link file does not retain effective batch quantities.'
