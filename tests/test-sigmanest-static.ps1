@@ -37,7 +37,7 @@ Assert ($serverVersion -eq '2.32.2') "Unexpected bridge version: $serverVersion"
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
 Assert ($com.Contains("CreateTasksListForNewPartsInWS")) 'Task creation method missing.'
-Assert ($com -match '\$phase\s*=\s*''CREATE_TASKS_FOR_IMPORTED_PARTS''') 'AutoTask phase does not explicitly create tasks before AutoTask.'
+Assert ($com -match '\$phase\s*=\s*''CREATE_TASKS_FOR_CL_DATA''') 'Import phase does not explicitly prepare TasksList production data.'
 Assert ($com -match '\$phase\s*=\s*''AUTO_TASK''') 'AutoTask phase missing.'
 Assert ($com.Contains('try{[void]$app.RefreshTreeView()}catch{}')) 'SigmaNEST tree refresh missing or return value is not suppressed.'
 Assert ($com.Contains('function SN-Set-QtyToNest')) 'Canonical SigmaNEST QtyToNest setter is missing.'
