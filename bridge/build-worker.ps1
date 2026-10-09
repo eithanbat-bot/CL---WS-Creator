@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.21.0'
+$WorkerVersion='2.22.0'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
