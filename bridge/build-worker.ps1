@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$WorkerVersion='2.32.2'
+$WorkerVersion='2.32.3'
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ComLibrary=Join-Path $Root 'sigmanest-com.ps1'
 
@@ -37,7 +37,7 @@ try{
 
   if($mode -eq 'AUTOTASK_ONLY'){
     $phase='AUTOTASK'
-    Write-BuildStatus $statusFile ([ordered]@{jobId=[string]$request.jobId;state='RUNNING';phase=$phase;message='Applying CL part data, running AutoTask and applying batch/order labels.';workerVersion=$WorkerVersion;pid=$PID;started=$started.ToString('o');finished=$null;elapsedSeconds=((Get-Date).ToUniversalTime()-$started).TotalSeconds;result=$null;parts=@($request.reportParts);outputDir=[string]$request.outputDir;jobName=[string]$request.jobName;selectedSheets=@($request.selectedSheets)})
+    Write-BuildStatus $statusFile ([ordered]@{jobId=[string]$request.jobId;state='RUNNING';phase=$phase;message='Reading production data from the saved WS, running AutoTask, preserving saved batch multipliers and applying order labels.';workerVersion=$WorkerVersion;pid=$PID;started=$started.ToString('o');finished=$null;elapsedSeconds=((Get-Date).ToUniversalTime()-$started).TotalSeconds;result=$null;parts=@($request.reportParts);outputDir=[string]$request.outputDir;jobName=[string]$request.jobName;selectedSheets=@($request.selectedSheets)})
     # SigmaNEST COM methods can emit non-result pipeline objects. Keep the
     # AutoTask worker contract identical to the geometry-import contract:
     # only the final structured result may reach the status/report layer.
