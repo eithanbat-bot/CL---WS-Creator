@@ -1183,10 +1183,12 @@ function SN-Set-TaskNameAndBatch($app,$requestParts){
         if(-not [string]::IsNullOrWhiteSpace([string]$rp.sigmaMaterial)){$materials+=[string]$rp.sigmaMaterial}
         $th=[double](SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN))
         if(-not [double]::IsNaN($th)){$thks+=$th}
+        $partMultis=@()
         foreach($tb in @($rp.taskBatches)){
-          $multis+=SN-Scalar-Int -value $tb.batchMultiplier -default 1
+          $partMultis+=SN-Scalar-Int -value $tb.batchMultiplier -default 1
         }
-        if($multis.Count -eq 0){$multis+=SN-Scalar-Int -value $rp.batchMultiplier -default 1}
+        if($partMultis.Count -eq 0){$partMultis+=SN-Scalar-Int -value $rp.batchMultiplier -default 1}
+        $multis+=@($partMultis)
       }
     }
     if($names.Count -eq 0){continue}
