@@ -47,12 +47,13 @@ function setActionEnabled(enabled){
   $('preview').disabled=!enabled;
   $('refreshSheets').disabled=!enabled;
   $('importGeometry').disabled=!enabled;
-  $('autoTaskOrder').disabled=!enabled||!currentWsPath;
+  // AutoTask acts on the saved WS and remains available without a CL loaded.
+  $('autoTaskOrder').disabled=!currentWsPath;
 }
 function updateWorkspacePath(path){
   currentWsPath=String(path||'').trim();
   $('wsPath').value=currentWsPath;
-  $('autoTaskOrder').disabled=!clWorkbook||!currentWsPath;
+  $('autoTaskOrder').disabled=!currentWsPath;
   try{localStorage.setItem('clwsc_lastWsPath',currentWsPath)}catch(e){}
 }
 
@@ -115,7 +116,7 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
     ['','','',''],
     ['HAND-OFF','DETAIL','',''],
     ['Geometry source','DXF-FIRST: matching .DXF is selected whenever found; .PRS is fallback only when no matching DXF exists.','',''],
-    ['CL overrides','Material, thickness and quantity are written to the SigmaNEST PartsList and TasksList, then verified after save.','',''],
+    ['CL overrides','Material, thickness, per-vehicle quantity and batch multiplier are applied and verified in the saved WS during Import Geometry. AutoTask reads the saved WS and does not overwrite part data from the CL workbook.','',''],
     ['Workspace',result.wsPath||currentWsPath||'Not available','',''],
     ['Warnings',warnings.join(' | '),'','']
   ];
@@ -139,14 +140,18 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
   });
   if(!taskRows.length)taskRows=[['No tasks created','','','','','','','']];
 
-  var summaryName='CL WS Summary',reviewName='Part Review';
+  var summaryName='CL WS Summary',reviewName='Part Review',dataCheckName='Import Data Check',taskName='Task Release';
   await Excel.run(async function(context){
     var wb=context.workbook;
     var oldSummary=wb.worksheets.getItemOrNullObject(summaryName);
     var oldReview=wb.worksheets.getItemOrNullObject(reviewName);
+    var oldDataCheck=wb.worksheets.getItemOrNullObject(dataCheckName);
+    var oldTask=wb.worksheets.getItemOrNullObject(taskName);
     await context.sync();
     if(!oldSummary.isNullObject)oldSummary.delete();
     if(!oldReview.isNullObject)oldReview.delete();
+    if(!oldDataCheck.isNullObject)oldDataCheck.delete();
+    if(!oldTask.isNullObject)oldTask.delete();
     await context.sync();
 
     var summarySheet=wb.worksheets.add(summaryName);
@@ -187,8 +192,40 @@ async function writeReportSheets(result,job,selectedSheetNames,actionName){
     reviewSheet.getRange('O:O').format.columnWidth=260;
     reviewSheet.freezePanes.freezeRows(1);
 
+    if(actionName==='Import Geometry'){
+      var updateByPart=new Map();
+      updates.forEach(function(u){
+        var key=String(u.part||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+        if(key)updateByPart.set(key,u);
+      });
+      var dataHeaders=['Part','Description','Qty per Vehicle','Batch Multiplier','Total Qty for Batch','CL Material','SigmaNEST Material','Thickness (mm)','Quantity Field','Batch Field','Description Handling','Import Verification'];
+      var dataRows=parts.map(function(p){
+        var key=String(p.part||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+        var u=updateByPart.get(key)||{};
+        var qty=Number(p.qty)||0,mult=Number(p.batchMultiplier)||1;
+        var warnings=Array.isArray(u.warnings)?u.warnings:[];
+        var productionOk=!!u.materialProperty&&!!u.thicknessProperty&&!!u.quantityProperty&&!!u.batchProperty;
+        var descHandling=u.descriptionProperty|| (p.description?'Retained in CL link; no writable SigmaNEST description field was exposed':'Not supplied');
+        var check=productionOk&&!warnings.length?'PASS':'CHECK';
+        return [p.part||'',p.description||'',qty,mult,qty*mult,p.material||p.clMaterial||'',p.sigmaMaterial||'',p.thicknessMm!=null?p.thicknessMm:(p.thickness||''),u.quantityProperty||'',u.batchProperty||'',descHandling,check];
+      });
+      if(!dataRows.length)dataRows=[['No imported parts','','','','','','','','','','','']];
+      var dm=[dataHeaders].concat(dataRows);
+      var dataSheet=wb.worksheets.add(dataCheckName);
+      dataSheet.getRangeByIndexes(0,0,dm.length,dataHeaders.length).values=rectangular(dm,dataHeaders.length);
+      var dh=dataSheet.getRangeByIndexes(0,0,1,dataHeaders.length);
+      dh.format.font.bold=true;dh.format.font.color='#FFFFFF';dh.format.fill.color='#0B2942';
+      dataSheet.getUsedRange().format.wrapText=true;
+      dataSheet.getUsedRange().format.autofitColumns();
+      dataSheet.getRange('B:B').format.columnWidth=220;
+      dataSheet.getRange('F:F').format.columnWidth=155;
+      dataSheet.getRange('G:G').format.columnWidth=155;
+      dataSheet.getRange('K:K').format.columnWidth=240;
+      dataSheet.getRange('L:L').format.columnWidth=145;
+      dataSheet.freezePanes.freezeRows(1);
+    }
     if(tasks.length){
-      var taskSheet=wb.worksheets.add('Task Release');
+      var taskSheet=wb.worksheets.add(taskName);
       var tr=[taskHeaders].concat(taskRows);
       taskSheet.getRangeByIndexes(0,0,tr.length,taskHeaders.length).values=rectangular(tr,taskHeaders.length);
       var th=taskSheet.getRangeByIndexes(0,0,1,taskHeaders.length);
@@ -536,13 +573,13 @@ async function importGeometry(){
 async function autoTaskOrder(){
   var btn=$('autoTaskOrder');btn.disabled=true;
   try{
-    if(!currentWsPath)throw new Error('Import Geometry first or enter the path of an existing SigmaNEST .ws.');
-    var parts=normalizeParts(lastActionParts.length?lastActionParts:await readCL());
-    if(!parts.length)throw new Error('No valid CL parts are available for AutoTask. Run Import Geometry Only first.');
+    if(!currentWsPath)throw new Error('Enter or import a SigmaNEST .ws workspace first.');
+    // Deliberately do not reread or resend the CL here. The saved WS is the
+    // sole source of material, thickness, quantity and batch multiplier.
     var selectedNames=selectedSheets().map(function(x){return x.name});
-    var prsRoot=$('libraryPath').value.trim()||'S:\\SNDataX1\\PARTS';
-    var job=$('jobName').value.trim()||'CL_JOB';
-    await runAction('/api/autotask-label',{prsRoot:prsRoot,wsPath:currentWsPath,jobName:job,selectedSheetNames:selectedNames,parts:parts},'AutoTask + Order Label');
+    var fromWs=currentWsPath.split(/[\\/]/).pop().replace(/\.ws$/i,'');
+    var job=$('jobName').value.trim()||fromWs||'CL_JOB';
+    await runAction('/api/autotask-label',{wsPath:currentWsPath,jobName:job,selectedSheetNames:selectedNames},'AutoTask + Order Label');
   }catch(e){
     $('buildStatus').textContent=e.message;pill('AutoTask failed','bad');
   }finally{updateCount();}
