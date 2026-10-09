@@ -851,7 +851,7 @@ function SN-Set-TaskMaterialAndThickness($app,$requestParts){
         $taskPartName=''
         try{$taskPartName=[string]$taskPart.Name}catch{}
         if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
+        if((SN-Normalize-PartIdentity $taskPartName) -ne (SN-Normalize-PartIdentity $targetName)){continue}
 
         $matched=$true
         $matchedTaskIndex=$ti
@@ -955,7 +955,7 @@ function SN-Set-TaskPartQuantity($app,$requestParts){
         $taskPartName=''
         try{$taskPartName=[string]$taskPart.Name}catch{}
         if([string]::IsNullOrWhiteSpace($taskPartName)){continue}
-        if(-not $taskPartName.Equals($targetName,[StringComparison]::OrdinalIgnoreCase)){continue}
+        if((SN-Normalize-PartIdentity $taskPartName) -ne (SN-Normalize-PartIdentity $targetName)){continue}
 
         $set=SN-Set-QtyToNest -partObj $taskPart -qty $quantity
         $readBack=$null
@@ -1168,7 +1168,7 @@ function Invoke-SigmaNestImportGeometry($Request){
 }
 function SN-Set-TaskNameAndBatch($app,$requestParts){
   $taskCount=0;try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
-  $map=@{};foreach($rp in @($requestParts)){$map[[string]$rp.part]=$rp}
+  $map=@{};foreach($rp in @($requestParts)){$map[(SN-Normalize-PartIdentity ([string]$rp.part))]=$rp}
   $results=@();$warnings=@()
   for($ti=0;$ti -lt $taskCount;$ti++){
     $task=$null;try{$task=$app.TasksList.Items($ti)}catch{continue}
@@ -1178,8 +1178,8 @@ function SN-Set-TaskNameAndBatch($app,$requestParts){
     for($pi=0;$pi -lt $pc;$pi++){
       try{$tp=$task.PartsList.Items($pi)}catch{continue}
       $pn='';try{$pn=[string]$tp.Name}catch{}
-      if($map.ContainsKey($pn)){
-        $rp=$map[$pn];$names+=$pn
+      if($map.ContainsKey((SN-Normalize-PartIdentity $pn))){
+        $rp=$map[(SN-Normalize-PartIdentity $pn)];$names+=$pn
         if(-not [string]::IsNullOrWhiteSpace([string]$rp.sigmaMaterial)){$materials+=[string]$rp.sigmaMaterial}
         $th=[double](SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN))
         if(-not [double]::IsNaN($th)){$thks+=$th}
