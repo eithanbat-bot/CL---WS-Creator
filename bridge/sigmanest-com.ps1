@@ -1079,13 +1079,19 @@ function Invoke-SigmaNestImportGeometry($Request){
       if($sourceType -eq 'PRS' -and $extension -ne '.prs'){throw ('PRS source has wrong file extension: '+$source)}
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
+      $batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
+      if($batchMultiplier -lt 1){$batchMultiplier=1}
       $created += [pscustomobject]@{
-        part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial
+        part=[string]$x.part;description=[string]$x.description;qty=$qty
+        baseQty=$qty;effectiveQty=($qty*$batchMultiplier)
+        clMaterial=[string]$x.clMaterial;material=[string]$x.sigmaMaterial
         thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN)
+        thicknessMm=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN)
         sourcePath=$source;sourceType=$sourceType
         importMethod=$(if($sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})
         matchType=[string]$x.matchType
-        batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
+        batchMultiplier=$batchMultiplier
+        taskBatches=@($x.taskBatches)
       }
       $queued += [pscustomobject]@{
         part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial
