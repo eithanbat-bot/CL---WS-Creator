@@ -11,19 +11,24 @@ function Assert([bool]$condition,[string]$message){if(-not $condition){throw $me
 $serverVersion=[regex]::Match($server,'(?m)^\s*\$BRIDGE_VERSION\s*=\s*''([^'']+)''').Groups[1].Value
 $workerVersion=[regex]::Match($worker,'(?m)^\s*\$WorkerVersion\s*=\s*''([^'']+)''').Groups[1].Value
 Assert ($serverVersion -eq $workerVersion) "Bridge/worker version mismatch: $serverVersion vs $workerVersion"
-Assert ($serverVersion -eq '2.20.0') "Unexpected bridge version: $serverVersion"
+Assert ($serverVersion -eq '2.21.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
 Assert ($com.Contains("CreateTasksListForNewPartsInWS")) 'Task creation method missing.'
 Assert ($com -match '\$phase\s*=\s*''CREATE_TASKS_FOR_IMPORTED_PARTS''') 'AutoTask phase does not explicitly create tasks before AutoTask.'
 Assert ($com -match '\$phase\s*=\s*''AUTO_TASK''') 'AutoTask phase missing.'
-Assert ($com.Contains('try{$app.RefreshTreeView()}catch{}')) 'SigmaNEST tree refresh missing.'
+Assert ($com.Contains('try{[void]$app.RefreshTreeView()}catch{}')) 'SigmaNEST tree refresh missing or return value is not suppressed.'
 Assert ($com.Contains('function SN-Set-QtyToNest')) 'Canonical SigmaNEST QtyToNest setter is missing.'
 Assert ($com.Contains("'NumberToNest','NumberToLoad','QtyToNest")) 'Fallback part quantity aliases are not present.'
 Assert ($com.Contains("[void](SN-Verify-WorkspaceCLData")) 'Import verification output is not suppressed.'
 Assert ($worker.Contains('$rawEngineData=@(if($mode -eq ''IMPORT_ONLY'')')) 'Worker does not capture complete engine pipeline output.'
 Assert ($worker.Contains('$engineResults=@($rawEngineData | Where-Object')) 'Worker does not filter for the structured engine result.'
+Assert ($worker.Contains('$rawAutoTaskData=@(Invoke-SigmaNestAutoTask')) 'Worker does not capture AutoTask pipeline output.'
+Assert ($worker.Contains('$autoTaskResults=@($rawAutoTaskData | Where-Object')) 'Worker does not filter AutoTask for the structured result.'
+Assert ($com.Contains('[void]$app.CreatePartsListForNewPartsInWS()')) 'Import geometry return value is not suppressed.'
+Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
+Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
 Assert ($taskpane.Contains('function normalizeParts(parts)')) 'Task pane null-part guard missing.'
 Assert ($taskpane.Contains("No valid CL parts are available for AutoTask")) 'Task pane AutoTask input guard missing.'
 
@@ -33,5 +38,6 @@ $autoStart=$com.IndexOf('function Invoke-SigmaNestAutoTask')
 $importBody=$com.Substring($importStart,$autoStart-$importStart)
 Assert (-not $importBody.Contains("CreateTasksListForNewPartsInWS()")) 'Import Geometry must not create TasksList entries.'
 Assert (-not $importBody.Contains("AutoTask()")) 'Import Geometry must not run AutoTask.'
+Assert ($importBody.Contains('[void]$app.CreatePartsListForNewPartsInWS()')) 'Import Geometry must suppress the PartsList-creation return value.'
 
 Write-Host ("SigmaNEST static release gate: PASS (bridge $serverVersion)") -ForegroundColor Green
