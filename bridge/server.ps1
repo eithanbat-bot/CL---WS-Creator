@@ -1006,6 +1006,13 @@ function Prepare-SigmaNestBuild($b){
       Set-Prop $p 'quantityOverride' $true | Out-Null
       $parts+=$p
     }
+    # A single SigmaNEST part has one BatchQty field. Do not import an ambiguous
+    # combined row whose source CL lines require different batch multipliers.
+    $batchVariantParts=@($parts|Where-Object {[string]$_.clReviewReason -eq 'CL BATCH VARIANTS'})
+    if($batchVariantParts.Count -gt 0){
+      $details=@($batchVariantParts|ForEach-Object {[string]$_.part+' ('+[string]$_.clReviewDetail+')'})
+      throw ('Import stopped because CL batch multipliers conflict for: '+($details -join '; ')+'. Separate these batches or make the CL multipliers consistent before importing.')
+    }
     $review=@($parts|Where-Object {$_.status -ne 'READY'})
     $reviewBreakdown=[ordered]@{}
     foreach($rp in $review){
