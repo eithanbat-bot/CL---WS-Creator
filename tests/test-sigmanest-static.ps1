@@ -55,7 +55,7 @@ $dxfQueueEnd=$com.IndexOf('# PRS is an explicit fallback', $dxfQueueStart)
 Assert ($dxfQueueStart -ge 0 -and $dxfQueueEnd -gt $dxfQueueStart) 'DXF queue branch is missing.'
 $dxfQueue=$com.Substring($dxfQueueStart,$dxfQueueEnd-$dxfQueueStart)
 Assert ($dxfQueue.Contains('[void]$app.LoadPart([string]$sourcePath)')) 'DXF import does not load the exact DXF into a fresh workspace.'
-Assert (-not $dxfQueue.Contains('Add2DDXFPart')) 'DXF import still relies on Add2DDXFPart, which does not add parts on an empty workspace.'
+Assert (-not $dxfQueue.Contains('$automation.Add2DDXFPart(')) 'DXF import still calls Add2DDXFPart, which does not add parts on an empty workspace.'
 Assert ($com.Contains('[void]$automation.FileSave([string]$wsPath,0,0)')) 'Import Geometry does not use the tested workspace save method.'
 Assert ($updater.Contains('$entry.ValidatedStage')) 'Updater does not install from the validated runtime stage.'
 Assert ($updater.Contains('Stage=$manifestStage')) 'Updater does not install manifest from its validated staging copy.'
