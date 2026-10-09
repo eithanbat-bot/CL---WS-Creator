@@ -11,7 +11,7 @@ function Assert([bool]$condition,[string]$message){if(-not $condition){throw $me
 $serverVersion=[regex]::Match($server,'(?m)^\s*\$BRIDGE_VERSION\s*=\s*''([^'']+)''').Groups[1].Value
 $workerVersion=[regex]::Match($worker,'(?m)^\s*\$WorkerVersion\s*=\s*''([^'']+)''').Groups[1].Value
 Assert ($serverVersion -eq $workerVersion) "Bridge/worker version mismatch: $serverVersion vs $workerVersion"
-Assert ($serverVersion -eq '2.21.0') "Unexpected bridge version: $serverVersion"
+Assert ($serverVersion -eq '2.22.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
@@ -27,6 +27,10 @@ Assert ($worker.Contains('$engineResults=@($rawEngineData | Where-Object')) 'Wor
 Assert ($worker.Contains('$rawAutoTaskData=@(Invoke-SigmaNestAutoTask')) 'Worker does not capture AutoTask pipeline output.'
 Assert ($worker.Contains('$autoTaskResults=@($rawAutoTaskData | Where-Object')) 'Worker does not filter AutoTask for the structured result.'
 Assert ($com.Contains('[void]$app.CreatePartsListForNewPartsInWS()')) 'Import geometry return value is not suppressed.'
+Assert ($com.Contains('[void]$automation.FileNew()')) 'Import Geometry does not initialize a new SigmaNEST workspace.'
+Assert ($com.Contains('[void]$automation.Add2DDXFPart([string]$sourcePath)')) 'Import Geometry does not use the tested DXF import method.'
+Assert ($com.Contains('[void]$automation.FileSave([string]$wsPath,0,0)')) 'Import Geometry does not use the tested workspace save method.'
+Assert ($com.Contains("function SN-Queue-Geometry(`$app,[string]`$sourcePath,[string]`$sourceType,`$clData=`$null,`$automation=`$null)")) 'Geometry queue does not accept the workspace automation object.'
 Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
 Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
 Assert ($taskpane.Contains('function normalizeParts(parts)')) 'Task pane null-part guard missing.'
