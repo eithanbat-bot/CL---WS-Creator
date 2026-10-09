@@ -274,18 +274,23 @@ function SN-Set-PartField($partObj,[string[]]$names,$value,[string]$expectedText
 }
 function SN-Normalize-PartIdentity([string]$value){
   if($null -eq $value){return ''}
-  return (($value.ToUpperInvariant() -replace '\\.[Pp][Rr][Ss]$','') -replace '[^A-Z0-9]','')
+  $trimmed=$value.Trim() -replace '(?i)\.(PRS|DXF)$',''
+  return ($trimmed.ToUpperInvariant() -replace '[^A-Z0-9]','')
 }
 function SN-Get-PartIdentity($partObj){
-  if($null -eq $partObj){return [pscustomobject]@{name='';drawing='';file='';normalizedName='';normalizedDrawing='';normalizedFile=''}}
-  $name='';$drawing='';$file=''
+  if($null -eq $partObj){return [pscustomobject]@{name='';drawing='';file='';path='';normalizedName='';normalizedDrawing='';normalizedFile=''}}
+  $name='';$drawing='';$file='';$path=''
   try{$name=[string]$partObj.Name}catch{}
   try{$drawing=[string]$partObj.DrawingNumber}catch{}
   try{$file=[string]$partObj.PartFilename}catch{}
+  try{$path=[string]$partObj.Path}catch{}
+  if([string]::IsNullOrWhiteSpace($file) -and -not [string]::IsNullOrWhiteSpace($name) -and $name -match '(?i)\.(PRS|DXF)$'){
+    if(-not [string]::IsNullOrWhiteSpace($path)){
+      try{$file=Join-Path -Path $path -ChildPath $name}catch{$file=[IO.Path]::Combine($path,$name)}
+    }else{$file=$name}
+  }
   return [pscustomobject]@{
-    name=$name
-    drawing=$drawing
-    file=$file
+    name=$name;drawing=$drawing;file=$file;path=$path
     normalizedName=(SN-Normalize-PartIdentity $name)
     normalizedDrawing=(SN-Normalize-PartIdentity $drawing)
     normalizedFile=(SN-Normalize-PartIdentity ([IO.Path]::GetFileNameWithoutExtension($file)))
@@ -772,7 +777,7 @@ function SN-Try-ImportPRS-WithSettings($app,[string]$sourcePath,$clData){
   }
   return [pscustomobject]@{ok=$false;diagnostics=$diagnostics}
 }
-function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=$null){
+function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=$null,$automation=$null){
   if([string]::IsNullOrWhiteSpace($sourcePath)){throw 'SigmaNEST geometry sourcePath is required; refusing implicit PRS fallback.'}
   $sourceType=([string]$sourceType).Trim().ToUpperInvariant()
   $extension=[IO.Path]::GetExtension($sourcePath).ToLowerInvariant()
@@ -784,11 +789,22 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=
   $errors=@()
 
   if($sourceType -eq 'DXF'){
-    # Use the exact .DXF path selected by the matcher. Do not probe the
-    # PartsList.Import overloads: some SigmaNEST COM registrations bind the
-    # reflection argument array incorrectly and surface "System.Object[] ->
-    # System.Int32" conversion errors. LoadPart accepts the exact path and
-    # keeps DXF selection deterministic; PRS fallback is forbidden here.
+    # Use the exact selected DXF. Add2DDXFPart initializes a new WS correctly;
+    # SNApp.LoadPart can create a PartsList entry without a saveable workspace.
+    if($null -ne $automation){
+      $before=SN-Parts-Count $app
+      try{
+        [void]$automation.Add2DDXFPart([string]$sourcePath)
+        Start-Sleep -Milliseconds 200
+        $after=SN-Parts-Count $app
+        if($after -le $before){throw ('SNAutomation.Add2DDXFPart did not add a SigmaNEST part; PartsList count remained '+$after+'.')}
+        return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='SNAutomation.Add2DDXFPart-DXF-GEOMETRY'}
+      }catch{
+        $errors+=('SNAutomation.Add2DDXFPart: '+(SN-ErrorText $_))
+      }
+      throw ('SigmaNEST could not import the selected .DXF "'+$label+'". No PRS fallback was attempted. '+($errors -join ' | '))
+    }
+    # Legacy callers without an automation object use the exact-path load path.
     try{
       [void]$app.LoadPart([string]$sourcePath)
       return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='LoadPart-DXF-GEOMETRY'}
@@ -1000,11 +1016,15 @@ function SN-Resolve-WS-Path($Request){
   return $wsDir
 }
 
-function SN-Save-WorkspaceVerified($app,[string]$wsPath,[string]$label){
+function SN-Save-WorkspaceVerified($app,[string]$wsPath,[string]$label,$automation=$null){
   $errors=@()
   for($attempt=1;$attempt -le 3;$attempt++){
     try{
-      [void]$app.SaveWorkSpaceFile([string]$wsPath)
+      if($null -ne $automation){
+        [void]$automation.FileSave([string]$wsPath,0,0)
+      }else{
+        [void]$app.SaveWorkSpaceFile([string]$wsPath)
+      }
       Start-Sleep -Milliseconds 350
       if(Test-Path -LiteralPath $wsPath){
         return [pscustomobject]@{ok=$true;attempt=$attempt;path=$wsPath;label=$label}
@@ -1018,9 +1038,13 @@ function SN-Save-WorkspaceVerified($app,[string]$wsPath,[string]$label){
 }
 
 function Invoke-SigmaNestImportGeometry($Request){
-  $phase='START';$app=$null;$created=@();$partUpdates=@()
+  $phase='START';$app=$null;$automation=$null;$created=@();$partUpdates=@()
   try{
     if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'SigmaNEST COM requires STA.'}
+    $automation=New-Object -ComObject SigmaNEST.SNAutomation
+    if($null -eq $automation){throw 'SigmaNEST.SNAutomation returned null.'}
+    [void]$automation.FileNew()
+    Start-Sleep -Milliseconds 200
     $app=New-Object -ComObject SigmaNEST.SNApp
     if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
     $wsDir=SN-Resolve-WS-Path -Request $Request
@@ -1039,7 +1063,7 @@ function Invoke-SigmaNestImportGeometry($Request){
       if([string]::IsNullOrWhiteSpace($source)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourcePath. Refusing implicit PRS fallback.')}
       $sourceType=([string]$x.sourceType).Trim().ToUpperInvariant()
       if([string]::IsNullOrWhiteSpace($sourceType)){throw ('CL part "'+[string]$x.part+'" has no explicit geometry sourceType. Expected DXF or PRS.')}
-      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType $sourceType -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty})
+      $load=SN-Queue-Geometry -app $app -sourcePath $source -sourceType $sourceType -clData ([pscustomobject]@{sigmaMaterial=[string]$x.sigmaMaterial;thicknessMm=$x.thicknessMm;qty=$x.qty}) -automation $automation
       $qty=SN-Scalar-Int -value $x.qty -default 1
       if($qty -lt 1){$qty=1}
       $created += [pscustomobject]@{part=[string]$x.part;qty=$qty;material=[string]$x.sigmaMaterial;thickness=SN-Scalar-Number -value $x.thicknessMm -default ([double]::NaN);sourcePath=$source;sourceType=[string]$x.sourceType;importMethod=[string]$load.method;matchType=[string]$x.matchType;batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1}
@@ -1057,7 +1081,7 @@ function Invoke-SigmaNestImportGeometry($Request){
     # do not call AutoTask. The operator must be able to inspect/correct the
     # imported PartsList data before any task is generated.
     $phase='SAVE_WORKSPACE'
-    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import')
+    [void](SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'CL-data geometry import' -automation $automation)
     # Do not reload the saved workspace through SNApp here. SigmaNEST.SNApp
     # attaches to the active SigmaNEST UI, and a background LoadWorkSpaceFile
     # can disturb the operator's active workspace/Part Parameters dialog.
@@ -1103,7 +1127,10 @@ function Invoke-SigmaNestImportGeometry($Request){
       error=$_.Exception.Message
       message=$(if($exists){'SigmaNEST created a workspace checkpoint before the failure: '+$wsPath}else{'Geometry import failed before a verified workspace save.'})
     }
-  }finally{if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}}
+  }finally{
+    if($app){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app)}catch{}}
+    if($automation){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($automation)}catch{}}
+  }
 }
 function SN-Set-TaskNameAndBatch($app,$requestParts){
   $taskCount=0;try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
