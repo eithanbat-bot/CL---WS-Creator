@@ -12,7 +12,14 @@ $serverVersion=[regex]::Match($server,'(?m)^\s*\$BRIDGE_VERSION\s*=\s*''([^'']+)
 $workerVersion=[regex]::Match($worker,'(?m)^\s*\$WorkerVersion\s*=\s*''([^'']+)''').Groups[1].Value
 Assert ($serverVersion -eq $workerVersion) "Bridge/worker version mismatch: $serverVersion vs $workerVersion"
 Assert ($server.Contains("workerVersion='$serverVersion'")) 'Initial worker status does not report the current bridge version.'
-Assert ($serverVersion -eq '2.22.0') "Unexpected bridge version: $serverVersion"
+$matcherStart=$server.IndexOf('function Find-Part(')
+$matcherEnd=$server.IndexOf('function Csv(', $matcherStart)
+Assert ($matcherStart -ge 0 -and $matcherEnd -gt $matcherStart) 'Geometry matcher entry point is missing.'
+$matcher=$server.Substring($matcherStart,$matcherEnd-$matcherStart)
+Assert ($matcher.Contains('$exactCandidates=if($dxfExact.Count -gt 0){$dxfExact}else{$prsExact}')) 'Exact matching can let PRS override an available DXF.'
+Assert ($matcher.Contains('$embeddedCandidates=if($dxfEmbedded.Count -gt 0){$dxfEmbedded}else{$prsEmbedded}')) 'Embedded matching can let PRS override an available DXF.'
+Assert ($matcher.Contains('$variationCandidates=if($dxfVars.Count -gt 0){$dxfVars}else{$prsVars}')) 'Variation matching can let PRS override an available DXF.'
+Assert ($serverVersion -eq '2.23.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
