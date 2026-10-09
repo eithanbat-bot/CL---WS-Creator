@@ -17,7 +17,7 @@
     <div>
       <div class="eyebrow">SIGMANEST AUTOMATION</div>
       <h1>CL - WS Creator</h1>
-      <p>Import CL geometry, apply the CL material/thickness/quantity to the SigmaNEST part and task records, verify the saved workspace, then run AutoTask + Order Label when ready.</p>
+      <p>Import CL geometry and verify its saved production data first. Then use this add-in's green AutoTask button to create tasks with the saved batch multipliers and order labels.</p>
     </div>
     <div id="statusPill" class="pill neutral">Starting...</div>
   </header>
@@ -60,7 +60,7 @@
     <input id="jobName" type="text" placeholder="J032-26">
     <label for="wsPath">Current SigmaNEST workspace (.ws)</label>
     <input id="wsPath" type="text" placeholder="S:\SNDataX1\WS\J032-26.ws">
-    <div class="muted">Import Geometry creates this workspace. AutoTask uses this workspace without importing the geometry again.</div>
+    <div class="muted">Import Geometry creates this workspace. AutoTask reads this saved .ws only; it does not import geometry again. Use the green add-in button below for managed tasking.</div>
   </section>
 
   <section class="card actionCard">
@@ -68,9 +68,9 @@
     <div class="actionGrid">
       <button id="preview" class="secondary actionButton" type="button" disabled>Preview CL</button>
       <button id="importGeometry" class="primary actionButton" type="button" disabled>Import Geometry Only</button>
-      <button id="autoTaskOrder" class="accent actionButton" type="button" disabled>AutoTask + Label Order</button>
+      <button id="autoTaskOrder" class="accent actionButton" type="button" disabled>Run Add-in AutoTask + Label Order</button>
     </div>
-    <div id="buildStatus" class="muted">Import Geometry first, then run AutoTask + Label Order.</div>
+    <div id="buildStatus" class="muted">Workflow: Import Geometry Only → review Import Data Check → click the green Run Add-in AutoTask + Label Order button. Do not use SigmaNEST's top-ribbon Auto Nest for this managed step; it bypasses this add-in's batch and order-label processing.</div>
   </section>
 
   <section class="card">
