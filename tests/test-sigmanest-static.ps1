@@ -66,6 +66,7 @@ Assert ($bat.Contains('?cb=') -and $bat.Contains('$cb')) 'Bootstrap does not cac
 Assert ($com.Contains("function SN-Queue-Geometry(`$app,[string]`$sourcePath,[string]`$sourceType,`$clData=`$null,`$automation=`$null)")) 'Geometry queue does not accept the workspace automation object.'
 Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
 Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
+Assert ($com.Contains('$partMultis=@()')) 'Task batch logic does not collect multipliers per part.'
 Assert ($com.Contains('[void]$automation.AddPartImport([string]$x.sourcePath,[double]1.0,[double]1.0,0,0,0)')) 'DXF import does not use SigmaNEST AddPartImport.'
 Assert ($com.Contains("importMethod=`$(if(`$sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})")) 'Import result does not distinguish DXF and PRS loading.'
 Assert ($com.Contains('[void]$automation.ResetSigmaNEST()')) 'Import/AutoTask does not clear stale SigmaNEST workspace rows before loading.'
@@ -83,6 +84,10 @@ Assert ($taskpane.Contains("No valid CL parts are available for AutoTask")) 'Tas
 $importStart=$com.IndexOf('function Invoke-SigmaNestImportGeometry')
 $autoStart=$com.IndexOf('function Invoke-SigmaNestAutoTask')
 $importBody=$com.Substring($importStart,$autoStart-$importStart)
+Assert ($importBody.Contains('$automation.AddPartImport([string]$x.sourcePath')) 'Import Geometry does not use the tested DXF AddPartImport method.'
+Assert ($importBody.Contains("importMethod=`$(if(`$sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})")) 'Import Geometry reports incorrect geometry source methods.'
+Assert ($importBody.Contains('$app.LoadPart([string]$x.sourcePath)')) 'Import Geometry does not load explicit PRS sources.'
+Assert (-not $importBody.Contains('LoadPart-DXF-GEOMETRY')) 'Import Geometry still reports the unverified DXF LoadPart route.'
 Assert (-not $importBody.Contains("CreateTasksListForNewPartsInWS()")) 'Import Geometry must not create TasksList entries.'
 Assert (-not $importBody.Contains("AutoTask()")) 'Import Geometry must not run AutoTask.'
 Assert ($importBody.Contains('[void]$app.CreatePartsListForNewPartsInWS()')) 'Import Geometry must suppress the PartsList-creation return value.'
