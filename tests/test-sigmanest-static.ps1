@@ -12,7 +12,7 @@ function Assert([bool]$condition,[string]$message){if(-not $condition){throw $me
 $serverVersion=[regex]::Match($server,'(?m)^\s*\$BRIDGE_VERSION\s*=\s*''([^'']+)''').Groups[1].Value
 $workerVersion=[regex]::Match($worker,'(?m)^\s*\$WorkerVersion\s*=\s*''([^'']+)''').Groups[1].Value
 Assert ($serverVersion -eq $workerVersion) "Bridge/worker version mismatch: $serverVersion vs $workerVersion"
-Assert ($server.Contains("workerVersion='$serverVersion'")) 'Initial worker status does not report the current bridge version.'
+Assert ($server.Contains('workerVersion=$BRIDGE_VERSION')) 'Initial worker status does not report the current bridge version.'
 $matcherStart=$server.IndexOf('function Find-Part(')
 $matcherEnd=$server.IndexOf('function Csv(', $matcherStart)
 Assert ($matcherStart -ge 0 -and $matcherEnd -gt $matcherStart) 'Geometry matcher entry point is missing.'
