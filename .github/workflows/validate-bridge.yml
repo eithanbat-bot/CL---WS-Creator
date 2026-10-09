@@ -25,7 +25,8 @@ jobs:
             'tests/test-sigmanest-static.ps1',
             'tests/test-sigmanest-com-mock.ps1',
             'tests/test-sigmanest-real.ps1',
-            'tests/test-sigmanest-adapter-real.ps1'
+            'tests/test-sigmanest-adapter-real.ps1',
+            'tests/test-sigmanest-http-e2e.ps1'
           )
           foreach ($file in $files) {
             if (-not (Test-Path -LiteralPath $file)) {
