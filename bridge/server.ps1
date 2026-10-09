@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.23.0'
+$BRIDGE_VERSION = '2.24.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -345,11 +345,18 @@ function Get-DxfShardCandidates([string]$root,[string]$part){
     $reader=New-Object IO.StreamReader($shard,[Text.Encoding]::UTF8,$true)
     [void]$reader.ReadLine()
     while(($line=$reader.ReadLine()) -ne $null){
-      $tab=$line.IndexOf([char]9)
-      if($tab -lt 1){continue}
-      $partName=$line.Substring(0,$tab)
-      $file=$line.Substring($tab+1)
+      # DXF shards are TSV rows: PartName, File, LastWriteUtc, Length.
+      # Parse only the File column. The old "rest of line" parser appended
+      # timestamp/length fields to the path, causing GetFileName to throw and
+      # silently returning zero DXF candidates.
+      $columns=$line.Split([char]9)
+      if($columns.Count -lt 2){continue}
+      $partName=[string]$columns[0]
+      $file=[string]$columns[1]
       if([string]::IsNullOrWhiteSpace($file)){continue}
+      $lastWriteUtc=if($columns.Count -gt 2){[string]$columns[2]}else{''}
+      $fileLength=0
+      if($columns.Count -gt 3){try{$fileLength=[long]$columns[3]}catch{$fileLength=0}}
       $items += [pscustomobject]@{
         file=$file
         fileName=[IO.Path]::GetFileName($file)
@@ -361,6 +368,8 @@ function Get-DxfShardCandidates([string]$root,[string]$part){
         sourceDxf=$file
         rotations=''
         metadataLoaded=$true
+        lastWriteUtc=$lastWriteUtc
+        length=$fileLength
       }
     }
   }catch{}finally{
@@ -799,7 +808,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.23.0'
+    workerVersion='2.24.0'
     pid=$null
     started=$started.ToString('o')
     finished=$null
