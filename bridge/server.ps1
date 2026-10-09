@@ -1078,10 +1078,19 @@ function Prepare-SigmaNestBuild($b){
         [pscustomobject]@{
           part=$_.part
           description=[string]$_.description
+          # Keep source CL strings separate from SigmaNEST's normalized library
+          # material. They are written to CL_DATA_LINK.json for audit/reporting.
+          material=[string]$_.material
+          clMaterial=[string]$_.material
+          rawMaterial=[string]$_.rawMaterial
+          thickness=[string]$_.thickness
+          clThickness=[string]$_.thickness
           qty=$_.qty
           batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1})
           effectiveQty=[double]$_.effectiveQty
           taskBatches=@($_.taskBatches)
+          sourceSheets=@($_.sourceSheets)
+          sourceRows=@($_.sourceRows)
           taskSheet=$_.sheet
           sourcePath=$_.sourcePath
           sourceType=([string]$_.sourceType).Trim().ToUpperInvariant()
