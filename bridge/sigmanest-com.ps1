@@ -435,9 +435,13 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
     $row.partBatchQty=$partBatch
     $row.batchProperty=[string]$(if($DeferBatchToTasks){'TASKS_LIST.PartsList.BatchQty'}else{$batchInfo.path})
 
-    # SigmaNEST 11.4 does not expose a writable part Description on the tested
-    # DXF parts. Keep the original CL description in the linked CL data record.
-    if(-not [string]::IsNullOrWhiteSpace([string]$rp.description)){$row.descriptionProperty='CL_DATA_LINK_ONLY'}
+    # SigmaNEST 11.4 exposes the editable part note as Remark, not Description.
+    # Copy the CL description into Remark so the actual saved WS contains it.
+    if(-not [string]::IsNullOrWhiteSpace([string]$rp.description)){
+      $descInfo=SN-Set-PartField -partObj $partObj -names @('Remark') -value ([string]$rp.description) -expectedText ([string]$rp.description)
+      if(-not $descInfo){throw ('CL description could not be written to SigmaNEST Remark for "'+$targetName+'".')}
+      $row.descriptionProperty=[string]$descInfo.path
+    }
     $drawingSet=SN-Set-PartField -partObj $partObj -names @('DrawingNumber','DrawingNo','DwgNumber','DwgNo','PartNumber','PartNo') -value $targetName -expectedText $targetName
     $workSet=SN-Set-PartField -partObj $partObj -names @('WONumber','WorkOrder','WorkOrderNumber','OrderNumber') -value $jobName -expectedText $jobName
     if($drawingSet){$row.drawingProperty=[string]$drawingSet.path}
@@ -551,6 +555,11 @@ function SN-Verify-WorkspaceCLData($app,$requestParts){
     # Verify the actual Part Parameters quantity field, not a task-only batch field.
     $q=SN-Read-PartField -partObj $found.part -aliases @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
     if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
+    $expectedDescription=[string]$rp.description
+    if(-not [string]::IsNullOrWhiteSpace($expectedDescription)){
+      $d=SN-Read-PartField -partObj $found.part -aliases @('Remark') -expectedText $expectedDescription
+      if($null -eq $d){throw ('Post-save verification failed for "'+$target+'": CL description was not saved in SigmaNEST Remark.')}
+    }
     # BatchQty is stored on the Task/TaskPart entries, not the PartsList during
     # geometry import: SigmaNEST multiplies QtyToNest when TasksList is created.
     # Verify the persisted task batch separately with SN-Verify-WorkspaceTaskData.
@@ -1306,6 +1315,8 @@ function SN-Read-WorkspaceProductionData($app){
       $qf=SN-Read-PreferredPartField -partObj $partObj -aliases @('QtyToNest','NumberToNest','NumberToLoad','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity')
       $qty=if($qf){SN-Scalar-Int -value $qf.value -default 0}else{0}
       if($qty -lt 1){throw ('Saved WS task part "'+$partName+'" has no valid per-vehicle QtyToNest. Rerun Import Geometry before tasking.')}
+      $df=SN-Read-PreferredPartField -partObj $partObj -aliases @('Remark')
+      $description=if($df){[string]$df.value}else{''}
       $bf=SN-Read-PreferredPartField -partObj $partObj -aliases @('BatchQty','BatchQuantity','BatchMultiplier','Batch')
       $batch=if($bf){SN-Scalar-Int -value $bf.value -default 0}else{0}
       if($batch -lt 1){throw ('Saved WS task part "'+$partName+'" has no valid BatchQty multiplier. Rerun Import Geometry before tasking.')}
@@ -1324,7 +1335,7 @@ function SN-Read-WorkspaceProductionData($app){
         taskName=[string]$task.Name
         sourcePath=[string]$identity.file
         sourceType=([IO.Path]::GetExtension([string]$identity.file).TrimStart('.').ToUpperInvariant())
-        description=''
+        description=$description
         quantityProperty=[string]$(if($qf){$qf.path}else{''})
         materialProperty=[string]$(if($mf){$mf.path}else{''})
         thicknessProperty=[string]$(if($tf){$tf.path}else{''})
@@ -1388,6 +1399,11 @@ function SN-Apply-TaskCLData($app,$requestParts){
       $tp=$entry.partObj;$rp=$entry.requestPart;$target=[string]$rp.part
       $bi=SN-Set-PartField -partObj $tp -names @('BatchQty','BatchQuantity','BatchMultiplier','Batch') -value $batch -expectedInt $batch
       if(-not $bi){throw ('CL batch multiplier x'+$batch+' could not be written to TasksList part "'+$target+'".')}
+      $description=[string]$rp.description
+      if(-not [string]::IsNullOrWhiteSpace($description)){
+        $descInfo=SN-Set-PartField -partObj $tp -names @('Remark') -value $description -expectedText $description
+        if(-not $descInfo){throw ('CL description could not be written to TasksList Remark for "'+$target+'".')}
+      }
     }
   }
 
@@ -1411,10 +1427,15 @@ function SN-Apply-TaskCLData($app,$requestParts){
         $expectedBatch=SN-Scalar-Int -value $rp.batchMultiplier -default 1
         $expectedMaterial=[string]$rp.sigmaMaterial
         $expectedThickness=SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN)
+        $description=[string]$tp.Remark
+        $expectedDescription=[string]$rp.description
         if($qty -ne $expectedQty){throw ('Task-side QtyToNest for "'+$target+'" is '+$qty+' after BatchQty assignment; expected per-vehicle quantity '+$expectedQty+'.')}
         if($batch -ne $expectedBatch){throw ('Task-side BatchQty for "'+$target+'" is '+$batch+'; expected '+$expectedBatch+'.')}
         if(-not $material.Trim().Equals($expectedMaterial.Trim(),[StringComparison]::OrdinalIgnoreCase)){throw ('Task-side material for "'+$target+'" is "'+$material+'"; expected "'+$expectedMaterial+'".')}
         if([double]::IsNaN([double]$thickness) -or $thickness -ne $expectedThickness){throw ('Task-side thickness for "'+$target+'" is '+$thickness+'; expected '+$expectedThickness+'.')}
+        if(-not [string]::IsNullOrWhiteSpace($expectedDescription) -and -not $description.Trim().Equals($expectedDescription.Trim(),[StringComparison]::OrdinalIgnoreCase)){
+          throw ('Task-side Remark for "'+$target+'" is "'+$description+'"; it does not match the CL description.')
+        }
         $updates += [pscustomobject]@{
           part=$target;qty=$qty;material=$material;thickness=$thickness
           quantityProperty='TASKS_LIST.PartsList.QtyToNest'
@@ -1422,7 +1443,7 @@ function SN-Apply-TaskCLData($app,$requestParts){
           thicknessProperty='TASKS_LIST.PartsList.Thickness'
           batchMultiplier=$batch;batchProperty='TASKS_LIST.PartsList.BatchQty'
           taskBatchQuantityProperty='TASKS_LIST.BatchQuantity'
-          descriptionProperty=$(if(-not [string]::IsNullOrWhiteSpace([string]$rp.description)){'CL_DATA_LINK_ONLY'}else{''})
+          descriptionProperty=$(if(-not [string]::IsNullOrWhiteSpace([string]$rp.description)){'TASKS_LIST.PartsList.Remark'}else{''})
           drawingProperty='PARTS_LIST.DrawingNumber';workOrderProperty='PARTS_LIST.WONumber'
         }
         $matched=$true
@@ -1449,6 +1470,10 @@ function SN-Verify-WorkspaceTaskData($app,$requestParts){
     if([int]$sp.batchMultiplier -ne $batch){throw ('Saved WS TasksList BatchQty for "'+$rp.part+'" is '+$sp.batchMultiplier+'; expected '+$batch+'.')}
     if(-not ([string]$sp.sigmaMaterial).Trim().Equals($material.Trim(),[StringComparison]::OrdinalIgnoreCase)){throw ('Saved WS TasksList material for "'+$rp.part+'" is "'+$sp.sigmaMaterial+'"; expected "'+$material+'".')}
     if([double]$sp.thicknessMm -ne $thickness){throw ('Saved WS TasksList thickness for "'+$rp.part+'" is '+$sp.thicknessMm+'; expected '+$thickness+'.')}
+    $expectedDescription=[string]$rp.description
+    if(-not [string]::IsNullOrWhiteSpace($expectedDescription) -and -not ([string]$sp.description).Trim().Equals($expectedDescription.Trim(),[StringComparison]::OrdinalIgnoreCase)){
+      throw ('Saved WS TasksList Remark for "'+$rp.part+'" does not match the CL description.')
+    }
     if($seen.ContainsKey($key)){throw ('Saved WS TasksList contains duplicate part "'+$rp.part+'".')}
     $seen[$key]=$true
   }
