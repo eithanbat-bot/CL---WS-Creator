@@ -53,6 +53,10 @@ Assert ($com.Contains('[void]$automation.Add2DDXFPart([string]$sourcePath)')) 'I
 Assert ($com.Contains('[void]$automation.FileSave([string]$wsPath,0,0)')) 'Import Geometry does not use the tested workspace save method.'
 Assert ($updater.Contains('$entry.ValidatedStage')) 'Updater does not install from the validated runtime stage.'
 Assert ($updater.Contains('Stage=$manifestStage')) 'Updater does not install manifest from its validated staging copy.'
+Assert ($updater.Contains("$stageRoot=Join-Path `$BridgeDir ('_update-stage-'+[Guid]::NewGuid().ToString('N'))")) 'Updater validated staging is not isolated from TEMP cleanup.'
+Assert ($updater.Contains('?cb=$cacheBust')) 'Updater does not cache-bust its refreshed bootstrap download.'
+$bat=Get-Content -Raw (Join-Path $Root 'Start Bridge Fixed.bat')
+Assert ($bat.Contains("'?cb=''+$cb")) 'Bootstrap does not cache-bust the downloaded updater.'
 Assert ($com.Contains("function SN-Queue-Geometry(`$app,[string]`$sourcePath,[string]`$sourceType,`$clData=`$null,`$automation=`$null)")) 'Geometry queue does not accept the workspace automation object.'
 Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
 Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
