@@ -1166,7 +1166,7 @@ function Handle-Request($req){
     if($null -eq $b){throw 'Import request body is required.'}
     $workerRequest=[pscustomobject]@{jobId='';statusFile='';mode='IMPORT_ONLY';jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'});outputDir='';selectedSheets=@($b.selectedSheetNames);reportParts=@($b.parts);buildRequest=$b}
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
-    return [pscustomobject]@{Status=202;Data=@{accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started;outputDir='';message='Geometry import accepted. CL data will be applied to the SigmaNEST PartsList, verified, and saved. Tasks and AutoTask are deliberately not created by this action.'}}
+    return [pscustomobject]@{Status=202;Data=@{accepted=$true;state='RUNNING';jobId=$workerInfo.jobId;pid=$workerInfo.pid;started=$workerInfo.started;outputDir='';message='Geometry and CL production data (material, thickness, per-vehicle quantity, description and batch multiplier) will be applied to PartsList/TasksList and verified in the saved WS. AutoTask runs only when you choose AutoTask.'}}
   }
   if($req.Path -eq '/api/autotask-label' -and $req.Method -eq 'POST'){
     $b=$req.Body|ConvertFrom-Json
