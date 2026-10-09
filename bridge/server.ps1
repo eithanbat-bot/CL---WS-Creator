@@ -2,7 +2,7 @@ param([switch]$LibraryOnly)
 
 $ErrorActionPreference = 'Stop'
 $PORT = 17832
-$BRIDGE_VERSION = '2.22.0'
+$BRIDGE_VERSION = '2.23.0'
 $DEFAULT_LIBRARY = if($env:SN_PARTS){$env:SN_PARTS}else{'S:\SNDataX1\PARTS'}
 $DEFAULT_DXF_LIBRARY = if($env:SN_DXF){$env:SN_DXF}else{'Y:\'}
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -557,7 +557,10 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
   $prsExact=@()
   if($script:BYNAME -and $script:BYNAME.ContainsKey($n)){$prsExact=@($script:BYNAME[$n])}
   $dxfExact=@($dxf|Where-Object {(Normalize -s $_.partName) -eq $n})
-  $exact=@(Deduplicate-Candidates ($prsExact+$dxfExact))
+  # Restrict candidates to DXF whenever an exact DXF exists. Do not let PRS
+  # metadata win the geometry-selection step just because it has material data.
+  $exactCandidates=if($dxfExact.Count -gt 0){$dxfExact}else{$prsExact}
+  $exact=@(Deduplicate-Candidates $exactCandidates)
   if($exact.Count){
     $hit=Select-MatchCandidate -candidates $exact -clMat $clMat -clThk $clThk -matchType 'EXACT'
     if($hit -and -not($hit.PSObject.Properties.Name -contains 'ambiguous')){
@@ -570,7 +573,8 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
 
   $prsEmbedded=@($script:INDEX|Where-Object {Is-EmbeddedMatch -candidate $_.embeddedPartName -target $part})
   $dxfEmbedded=@($dxf|Where-Object {Is-EmbeddedMatch -candidate $_.embeddedPartName -target $part})
-  $embedded=@(Deduplicate-Candidates ($prsEmbedded+$dxfEmbedded))
+  $embeddedCandidates=if($dxfEmbedded.Count -gt 0){$dxfEmbedded}else{$prsEmbedded}
+  $embedded=@(Deduplicate-Candidates $embeddedCandidates)
   if($embedded.Count){
     $hit=Select-MatchCandidate -candidates $embedded -clMat $clMat -clThk $clThk -matchType 'EMBEDDED'
     if($hit -and -not($hit.PSObject.Properties.Name -contains 'ambiguous')){
@@ -585,7 +589,8 @@ function Find-Part([string]$part,[string]$clMat='',[string]$clThk=''){
   $prsVars=@()
   if($script:BYVAR -and $script:BYVAR.ContainsKey($vk)){$prsVars=@($script:BYVAR[$vk])}
   $dxfVars=@($dxf|Where-Object {(VariationKey -s $_.partName) -eq $vk})
-  $vars=@(Deduplicate-Candidates ($prsVars+$dxfVars))
+  $variationCandidates=if($dxfVars.Count -gt 0){$dxfVars}else{$prsVars}
+  $vars=@(Deduplicate-Candidates $variationCandidates)
   if($vars.Count){
     $hit=Select-MatchCandidate -candidates $vars -clMat $clMat -clThk $clThk -matchType 'VARIATION'
     if($hit){
@@ -794,7 +799,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.22.0'
+    workerVersion='2.23.0'
     pid=$null
     started=$started.ToString('o')
     finished=$null
