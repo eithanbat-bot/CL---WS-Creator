@@ -7,7 +7,7 @@ $dxfRoot='Y:\'
 $jobName='CLWS-HTTP-E2E-'+[Guid]::NewGuid().ToString('N').Substring(0,8)
 $wsDirectory=Join-Path $env:TEMP $jobName
 $stagingDirectory=Join-Path $prsRoot ('_CL_WS_BUILDER\'+$jobName)
-$importJobId='';$autoJobId='';$wsPath='';$verify=$null
+$importJobId='';$autoJobId='';$wsPath='';$verify=$null;$verifyAutomation=$null
 New-Item -ItemType Directory -Path $wsDirectory -Force|Out-Null
 
 function Wait-Job([string]$id,[int]$timeoutSeconds=150){
@@ -68,8 +68,12 @@ try{
     throw ('AutoTask API returned warnings: '+(@($autoStatus.result.warnings) -join ' | '))
   }
 
+  $verifyAutomation=New-Object -ComObject SigmaNEST.SNAutomation
+  [void]$verifyAutomation.FileNew()
+  Start-Sleep -Milliseconds 250
   $verify=New-Object -ComObject SigmaNEST.SNApp
   [void]$verify.LoadWorkSpaceFile([string]$wsPath)
+  Start-Sleep -Milliseconds 250
   $found=SN-Find-WorkspacePartExact -app $verify -targetName 'PC-2A' -sourcePath ([string]$importStatus.parts[0].sourcePath) -usedIndices @()
   if($null -eq $found){throw 'Final saved workspace does not contain PC-2A.'}
   $m=SN-Read-PartField -partObj $found.part -aliases @('Material','MaterialName','Mat','MatName','MaterialType') -expectedText 'MS'
@@ -127,6 +131,7 @@ try{
   }|ConvertTo-Json -Depth 20
 }finally{
   if($verify){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($verify)}catch{}}
+  if($verifyAutomation){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($verifyAutomation)}catch{}}
   if($wsPath -and (Test-Path -LiteralPath $wsPath)){Remove-Item -LiteralPath $wsPath -Force -ErrorAction SilentlyContinue}
   if(Test-Path -LiteralPath $wsDirectory){Remove-Item -LiteralPath $wsDirectory -Recurse -Force -ErrorAction SilentlyContinue}
   if(Test-Path -LiteralPath $stagingDirectory){Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue}
