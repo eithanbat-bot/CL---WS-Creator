@@ -815,7 +815,7 @@ function Start-SigmaNestBuildWorker($request){
     state='STARTING'
     phase='QUEUED'
     message='SigmaNEST build accepted and queued.'
-    workerVersion='2.30.0'
+    workerVersion=$BRIDGE_VERSION
     pid=$null
     started=$started.ToString('o')
     finished=$null
@@ -991,9 +991,8 @@ function Prepare-SigmaNestBuild($b){
       Set-Prop -obj $p -name 'prs' -value $(if($sourceType -eq 'PRS'){[string]$f.file}else{''}) | Out-Null
       Set-Prop -obj $p -name 'sourceDxf' -value $(if($sourceType -eq 'DXF'){[string]$f.file}else{[string]$f.sourceDxf}) | Out-Null
       Set-Prop -obj $p -name 'matchType' -value $f.matchType | Out-Null
-      # Carry the exact normalized CL production values into reportParts. The
-      # subsequent AutoTask button reuses these rows, so it cannot fall back
-      # to the PRS metadata after the first import.
+      # Keep normalized CL values in the import/report result. AutoTask now
+      # reopens the saved WS and does not accept fresh CL values from Excel.
       Set-Prop $p 'sigmaMaterial' (Sigma-Material -cl $clMat -lib $libMat -thickness $clThk) | Out-Null
       Set-Prop $p 'thicknessMm' (Thickness-Number -s $clThk) | Out-Null
       Set-Prop $p 'quantityPerVehicle' ([double]$p.qty) | Out-Null
@@ -1071,8 +1070,10 @@ function Prepare-SigmaNestBuild($b){
       parts=@($importable|ForEach-Object{
         [pscustomobject]@{
           part=$_.part
+          description=[string]$_.description
           qty=$_.qty
           batchMultiplier=$(if($_.batchMultiplier){$_.batchMultiplier}else{1})
+          effectiveQty=[double]$_.effectiveQty
           taskBatches=@($_.taskBatches)
           taskSheet=$_.sheet
           sourcePath=$_.sourcePath
@@ -1163,12 +1164,11 @@ function Handle-Request($req){
       jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
       outputDir=(Split-Path -Parent $ws)
       selectedSheets=@($b.selectedSheetNames)
-      reportParts=@($b.parts)
+      # Tasking is WS-only; ignore any legacy parts payload from cached task panes.
+      reportParts=@()
       autoTaskRequest=[pscustomobject]@{
         wsPath=$ws
         jobName=[string]$(if($b.jobName){$b.jobName}else{'CL_JOB'})
-        parts=@($b.parts)
-        libraryRoot=[string]$b.prsRoot
       }
     }
     $workerInfo=Start-SigmaNestBuildWorker -request $workerRequest
