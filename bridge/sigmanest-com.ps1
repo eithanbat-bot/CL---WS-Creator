@@ -382,6 +382,9 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
       materialProperty=''
       thicknessProperty=''
       warnings=@()
+      batchMultiplier=1
+      batchProperty=''
+      descriptionProperty=''
     }
 
     if(-not [string]::IsNullOrWhiteSpace($material)){
@@ -409,6 +412,22 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
       throw ('CL quantity '+$qty+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
     }
     $row.quantityProperty=[string]$setInfo.path
+
+    # BatchQty is a separate SigmaNEST part property from QtyToNest. Save the
+    # CL multiplier onto the part during Import Geometry so it survives in the
+    # WS and can be read by AutoTask without consulting the CL again.
+    $batch=SN-Scalar-Int -value $rp.batchMultiplier -default 1
+    if($batch -lt 1){$batch=1}
+    $batchInfo=SN-Set-PartField -partObj $partObj -names @('BatchQty','BatchQuantity','BatchMultiplier','Batch') -value $batch -expectedInt $batch
+    if(-not $batchInfo){
+      throw ('CL batch multiplier x'+$batch+' could not be written and verified on SigmaNEST part "'+$targetName+'".')
+    }
+    $row.batchMultiplier=$batch
+    $row.batchProperty=[string]$batchInfo.path
+
+    # SigmaNEST 11.4 does not expose a writable part Description on the tested
+    # DXF parts. Keep the original CL description in the linked CL data record.
+    if(-not [string]::IsNullOrWhiteSpace([string]$rp.description)){$row.descriptionProperty='CL_DATA_LINK_ONLY'}
     $drawingSet=SN-Set-PartField -partObj $partObj -names @('DrawingNumber','DrawingNo','DwgNumber','DwgNo','PartNumber','PartNo') -value $targetName -expectedText $targetName
     $workSet=SN-Set-PartField -partObj $partObj -names @('WONumber','WorkOrder','WorkOrderNumber','OrderNumber') -value $jobName -expectedText $jobName
     if($drawingSet){$row.drawingProperty=[string]$drawingSet.path}
@@ -424,11 +443,14 @@ function SN-Apply-WorkspacePartData($app,$requestParts,[string]$jobName='',[stri
         linkKey=$(if($m.Count){[string]$m[0].linkKey}else{SN-Make-CLLinkKey -jobName $jobName -rp $rp})
         jobName=[string]$jobName
         clPart=[string]$rp.part
+        clDescription=[string]$rp.description
         clMaterial=[string]$rp.material
         sigmaMaterial=[string]$rp.sigmaMaterial
         clThickness=[string]$rp.thicknessMm
         clQuantity=(SN-Scalar-Int -value $rp.qty -default 1)
+        effectiveBatchQuantity=((SN-Scalar-Int -value $rp.qty -default 1)*(SN-Scalar-Int -value $rp.batchMultiplier -default 1))
         batchMultiplier=(SN-Scalar-Int -value $rp.batchMultiplier -default 1)
+        taskBatches=@($rp.taskBatches)
         sourceType=[string]$rp.sourceType
         sourcePath=[string]$rp.sourcePath
         sourceSheets=@($rp.sourceSheets)
@@ -519,6 +541,10 @@ function SN-Verify-WorkspaceCLData($app,$requestParts){
     # Verify the actual Part Parameters quantity field, not a task-only batch field.
     $q=SN-Read-PartField -partObj $found.part -aliases @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity') -expectedInt $qty
     if($null -eq $q){throw ('Post-save verification failed for "'+$target+'": quantity is not '+$qty+'.')}
+    $batch=SN-Scalar-Int -value $rp.batchMultiplier -default 1
+    if($batch -lt 1){$batch=1}
+    $b=SN-Read-PartField -partObj $found.part -aliases @('BatchQty','BatchQuantity','BatchMultiplier','Batch') -expectedInt $batch
+    if($null -eq $b){throw ('Post-save verification failed for "'+$target+'": BatchQty multiplier is not '+$batch+'.')}
   }
   return $true
 }
@@ -1064,7 +1090,10 @@ function Invoke-SigmaNestImportGeometry($Request){
       $queued += [pscustomobject]@{
         part=[string]$x.part;qty=$qty;sigmaMaterial=[string]$x.sigmaMaterial
         thicknessMm=$x.thicknessMm;sourcePath=$source;sourceType=$sourceType
+        description=[string]$x.description
         batchMultiplier=SN-Scalar-Int -value $x.batchMultiplier -default 1
+        effectiveQty=SN-Scalar-Int -value $x.effectiveQty -default ([int]$x.qty)
+        taskBatches=@($x.taskBatches)
         sourceSheets=@($x.sourceSheets);sourceRows=@($x.sourceRows)
       }
     }
@@ -1143,13 +1172,29 @@ function Invoke-SigmaNestImportGeometry($Request){
     $phase='VERIFY_SAVED_WORKSPACE'
     if(-not(Test-Path -LiteralPath $wsPath)){throw ('SigmaNEST workspace file was not created: '+$wsPath)}
     if((Get-Item -LiteralPath $wsPath).Length -le 1000){throw ('SigmaNEST saved an empty workspace after CL data was applied: '+$wsPath)}
+
+    # Reopen the actual file from disk and verify production values were saved,
+    # not merely held in the current COM session.
+    if($app){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($app);$app=$null}
+    [void]$automation.ResetSigmaNEST()
+    [void]$automation.FileNew()
+    Start-Sleep -Milliseconds 300
+    $app=New-Object -ComObject SigmaNEST.SNApp
+    if($null -eq $app){throw 'SigmaNEST.SNApp returned null during saved-WS verification.'}
+    [void]$app.LoadWorkSpaceFile([string]$wsPath)
+    Start-Sleep -Milliseconds 500
+    $actualCount=SN-Parts-Count $app
+    if($actualCount -lt $queued.Count){throw ('Saved WS has '+$actualCount+' part(s), but '+$queued.Count+' CL part(s) were imported.')}
+    $phase='VERIFY_SAVED_CL_DATA'
+    [void](SN-Verify-WorkspaceCLData -app $app -requestParts $queued)
+    $savedPartData=SN-Read-WorkspaceProductionData -app $app
     try{[void]$app.RefreshTreeView()}catch{}
     try{[void]$app.Redraw()}catch{}
     return [pscustomobject]@{
       ok=$true;phase='IMPORT_COMPLETE';wsPath=$wsPath;parts=$created;partCount=$actualCount
       partUpdates=@($partUpdates);clLinkFile=[string]$Request.clLinkFile;tasksCreated=0
-      message=('Geometry imported from the exact selected DXF/PRS path(s); CL material, thickness and quantity were verified and saved to '+$wsPath+'. Tasks/AutoTask were not run.')
-      sourceCount=$created.Count
+      message=('Geometry imported; CL material, thickness, per-vehicle quantity and batch multiplier were verified from the saved WS '+$wsPath+'. AutoTask was not run.')
+      sourceCount=$created.Count;savedPartData=@($savedPartData)
     }
   }catch{
     $exists=$false
@@ -1166,35 +1211,104 @@ function Invoke-SigmaNestImportGeometry($Request){
     if($automation){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($automation)}catch{}}
   }
 }
-function SN-Set-TaskNameAndBatch($app,$requestParts){
+function SN-Read-WorkspaceProductionData($app){
+  $partCount=SN-Parts-Count $app
+  if($partCount -le 0){throw 'The saved WS contains no SigmaNEST PartsList entries.'}
+  $records=@()
+  $seen=@{}
+  for($i=0;$i -lt $partCount;$i++){
+    $partObj=$null
+    try{$partObj=$app.PartsList.Items($i)}catch{}
+    if($null -eq $partObj){throw ('Cannot read saved WS PartsList item '+$i+'.')}
+    $identity=SN-Get-PartIdentity $partObj
+    $partName=[string]$(if(-not [string]::IsNullOrWhiteSpace([string]$identity.drawing)){$identity.drawing}else{$identity.name})
+    if([string]::IsNullOrWhiteSpace($partName)){throw ('Saved WS part '+$i+' has no drawing/name identity.')}
+    $key=SN-Normalize-PartIdentity $partName
+    if($seen.ContainsKey($key)){throw ('Saved WS contains duplicate part identity "'+$partName+'"; AutoTask cannot safely assign one batch multiplier to both rows.')}
+    $seen[$key]=$true
+
+    $mf=SN-Read-PartField -partObj $partObj -aliases @('Material','MaterialName','PartMaterial','MaterialDescription','MaterialType','Mat','MatName')
+    $material=if($mf){[string]$mf.value}else{''}
+    if([string]::IsNullOrWhiteSpace($material)){throw ('Saved WS part "'+$partName+'" has no readable material. Rerun Import Geometry and verify the CL material before tasking.')}
+
+    $tf=SN-Read-PartField -partObj $partObj -aliases @('Thickness','SheetThickness','MaterialThickness','ThicknessValue','PartThickness','Thk','Thick')
+    $thickness=if($tf){SN-Scalar-Number -value $tf.value -default ([double]::NaN)}else{[double]::NaN}
+    if([double]::IsNaN([double]$thickness) -or $thickness -le 0){throw ('Saved WS part "'+$partName+'" has no valid thickness. Rerun Import Geometry and verify the CL thickness before tasking.')}
+
+    $qf=SN-Read-PartField -partObj $partObj -aliases @('NumberToNest','NumberToLoad','QtyToNest','QuantityToNest','NestQuantity','QtyOrdered','Quantity','Qty','QtyRequired','QtyReq','QuantityOrdered','PartQuantity')
+    $qty=if($qf){SN-Scalar-Int -value $qf.value -default 0}else{0}
+    if($qty -lt 1){throw ('Saved WS part "'+$partName+'" has no valid QtyToNest value. Rerun Import Geometry before tasking.')}
+
+    # Import Geometry writes BatchQty onto each saved part; never substitute a
+    # worksheet value at this stage.
+    $bf=SN-Read-PartField -partObj $partObj -aliases @('BatchQty','BatchQuantity','BatchMultiplier','Batch')
+    $batch=if($bf){SN-Scalar-Int -value $bf.value -default 0}else{0}
+    if($batch -lt 1){throw ('Saved WS part "'+$partName+'" has no valid BatchQty multiplier. Rerun Import Geometry and verify the batch value before tasking.')}
+
+    $records += [pscustomobject]@{
+      part=$partName
+      name=[string]$identity.name
+      drawing=[string]$identity.drawing
+      sigmaMaterial=$material
+      material=$material
+      thicknessMm=[double]$thickness
+      thickness=[double]$thickness
+      qty=[int]$qty
+      batchMultiplier=[int]$batch
+      sourcePath=[string]$identity.file
+      sourceType=([IO.Path]::GetExtension([string]$identity.file).TrimStart('.').ToUpperInvariant())
+      description=''
+      quantityProperty=[string]$(if($qf){$qf.path}else{''})
+      materialProperty=[string]$(if($mf){$mf.path}else{''})
+      thicknessProperty=[string]$(if($tf){$tf.path}else{''})
+      batchProperty=[string]$(if($bf){$bf.path}else{''})
+    }
+  }
+  return @($records)
+}
+
+function SN-Set-TaskNameAndBatch($app,$workspaceParts){
   $taskCount=0;try{$taskCount=SN-Scalar-Int -value $app.TasksList.Count -default 0}catch{}
-  $map=@{};foreach($rp in @($requestParts)){$map[(SN-Normalize-PartIdentity ([string]$rp.part))]=$rp}
+  if($taskCount -le 0){throw 'SigmaNEST created no TasksList entries; AutoTask cannot label/batch the saved workspace.'}
+  $map=@{}
+  foreach($rp in @($workspaceParts)){
+    $key=SN-Normalize-PartIdentity ([string]$rp.part)
+    if([string]::IsNullOrWhiteSpace($key)){throw 'A saved workspace part has an empty identity.'}
+    if($map.ContainsKey($key)){throw ('Saved WS has duplicate normalized part identity "'+[string]$rp.part+'".')}
+    $map[$key]=$rp
+  }
   $results=@();$warnings=@()
   for($ti=0;$ti -lt $taskCount;$ti++){
-    $task=$null;try{$task=$app.TasksList.Items($ti)}catch{continue}
-    if($null -eq $task){continue}
+    $task=$null;try{$task=$app.TasksList.Items($ti)}catch{}
+    if($null -eq $task){throw ('Could not read SigmaNEST task '+($ti+1)+'.')}
     $names=@();$materials=@();$thks=@();$multis=@()
-    $pc=0;try{$pc=(SN-Scalar-Int -value $task.PartsList.Count -default 0)}catch{}
+    $pc=0;try{$pc=SN-Scalar-Int -value $task.PartsList.Count -default 0}catch{}
     for($pi=0;$pi -lt $pc;$pi++){
-      try{$tp=$task.PartsList.Items($pi)}catch{continue}
+      $tp=$null;try{$tp=$task.PartsList.Items($pi)}catch{}
+      if($null -eq $tp){throw ('Could not read part '+$pi+' from SigmaNEST task '+($ti+1)+'.')}
       $pn='';try{$pn=[string]$tp.Name}catch{}
-      if($map.ContainsKey((SN-Normalize-PartIdentity $pn))){
-        $rp=$map[(SN-Normalize-PartIdentity $pn)];$names+=$pn
-        if(-not [string]::IsNullOrWhiteSpace([string]$rp.sigmaMaterial)){$materials+=[string]$rp.sigmaMaterial}
-        $th=[double](SN-Scalar-Number -value $rp.thicknessMm -default ([double]::NaN))
-        if(-not [double]::IsNaN($th)){$thks+=$th}
-        $partMultis=@()
-        foreach($tb in @($rp.taskBatches)){
-          $partMultis+=SN-Scalar-Int -value $tb.batchMultiplier -default 1
-        }
-        if($partMultis.Count -eq 0){$partMultis+=SN-Scalar-Int -value $rp.batchMultiplier -default 1}
-        $multis+=@($partMultis)
+      $key=SN-Normalize-PartIdentity $pn
+      if(-not $map.ContainsKey($key)){
+        throw ('Task '+($ti+1)+' contains part "'+$pn+'" that is not present in the saved WS production-data snapshot. No CL values will be guessed.')
       }
+      $rp=$map[$key]
+      $names+=[string]$rp.part
+      $materials+=[string]$rp.sigmaMaterial
+      $thks+=[double]$rp.thicknessMm
+      $multis+=[int]$rp.batchMultiplier
     }
     if($names.Count -eq 0){continue}
-    $mat=if($materials.Count){$materials[0]}else{'UNKNOWN MATERIAL'}
-    $thk=if($thks.Count){$thks[0]}else{0}
+    $uniqueMaterials=@($materials|Sort-Object -Unique)
+    $uniqueThickness=@($thks|Sort-Object -Unique)
+    if($uniqueMaterials.Count -ne 1){throw ('Task '+($ti+1)+' mixes saved-WS materials: '+($uniqueMaterials -join ', ')+'. Correct the WS grouping before release.')}
+    if($uniqueThickness.Count -ne 1){throw ('Task '+($ti+1)+' mixes saved-WS thicknesses: '+($uniqueThickness -join ', ')+'. Correct the WS grouping before release.')}
     $uniqueMulti=@($multis|Sort-Object -Unique)
+    if($uniqueMulti.Count -ne 1){throw ('Task '+($ti+1)+' mixes saved-WS batch multipliers: '+($uniqueMulti -join ', ')+'. One SigmaNEST task cannot safely represent mixed batch multipliers.')}
+    $mat=[string]$uniqueMaterials[0]
+    $thk=[double]$uniqueThickness[0]
+    $batch=SN-Scalar-Int -value $uniqueMulti[0] -default 1
+    if($batch -lt 1){throw ('Task '+($ti+1)+' has an invalid saved-WS batch multiplier.')}
+
     $label=('{0:00} | {1} | {2:0.###}mm' -f ($ti+1),$mat,$thk)
     $labelApplied=$false;$labelProp=''
     foreach($prop in @('Name','TaskName','Description')){
@@ -1204,43 +1318,35 @@ function SN-Set-TaskNameAndBatch($app,$requestParts){
         if($back.Trim().Equals($label.Trim(),[StringComparison]::OrdinalIgnoreCase)){$labelApplied=$true;$labelProp=$prop;break}
       }catch{}
     }
-    if(-not $labelApplied){$warnings+=('Task '+($ti+1)+' could not be renamed; material/thickness grouping still exists.')}
-    $batchApplied=$false;$batchProp='';$batch=1
-    if($uniqueMulti.Count -eq 1){
-      $batch=SN-Scalar-Int -value $uniqueMulti[0] -default 1
-      if($batch -lt 1){$batch=1}
-      foreach($prop in @('BatchMultiplier','BatchQty','BatchQuantity','Batch')){
-        try{
-          $task.$prop=$batch
-          $back=SN-Scalar-Int -value $task.$prop -default -1
-          if($back -eq $batch){$batchApplied=$true;$batchProp=$prop;break}
-        }catch{}
-      }
-      if(-not $batchApplied){
-        foreach($pi in 0..([math]::Max(0,$pc-1))){
-          try{$tp=$task.PartsList.Items($pi)}catch{continue}
-          foreach($prop in @('BatchQty','BatchMultiplier','BatchQuantity','Batch')){
-            try{
-              $tp.$prop=$batch
-              $back=SN-Scalar-Int -value $tp.$prop -default -1
-              if($back -eq $batch){$batchApplied=$true;$batchProp='PART.'+$prop;break}
-            }catch{}
-          }
-          if($batchApplied){break}
-        }
-      }
-    }else{
-      $warnings+=('Task '+($ti+1)+' has mixed CL multipliers: '+($uniqueMulti -join ', ')+'. No multiplier was guessed.')
+    if(-not $labelApplied){throw ('SigmaNEST task '+($ti+1)+' did not accept its material/thickness order label.')}
+
+    $batchApplied=$false;$batchProp=''
+    foreach($prop in @('BatchQuantity','BatchMultiplier','BatchQty','Batch')){
+      try{
+        $task.$prop=$batch
+        $back=SN-Scalar-Int -value $task.$prop -default -1
+        if($back -eq $batch){$batchApplied=$true;$batchProp=$prop;break}
+      }catch{}
     }
-    if(-not $batchApplied -and $uniqueMulti.Count -eq 1){
-      $warnings+=('Task '+($ti+1)+' could not accept Batch multiplier x'+$batch+'.')
+    if(-not $batchApplied){
+      # Safe fallback: verify BatchQty already stored on every task part at import.
+      $partsHaveBatch=$true
+      for($pi=0;$pi -lt $pc;$pi++){
+        $tp=$null;try{$tp=$task.PartsList.Items($pi)}catch{}
+        $b=if($tp){SN-Read-PartField -partObj $tp -aliases @('BatchQty','BatchQuantity','BatchMultiplier','Batch') -expectedInt $batch}else{$null}
+        if($null -eq $b){$partsHaveBatch=$false;break}
+      }
+      if($partsHaveBatch){$batchApplied=$true;$batchProp='PART.BatchQty'}
     }
+    if(-not $batchApplied){throw ('SigmaNEST task '+($ti+1)+' could not accept or verify the saved-WS batch multiplier x'+$batch+'.')}
+
     $results+=[pscustomobject]@{
       taskIndex=$ti+1;taskName=$label;material=$mat;thickness=$thk;batchMultiplier=$batch
       batchApplied=$batchApplied;batchProperty=$batchProp;labelApplied=$labelApplied;labelProperty=$labelProp
       partCount=$names.Count;multipliers=($uniqueMulti -join ',')
     }
   }
+  if($results.Count -eq 0){throw 'AutoTask returned tasks but none could be mapped back to the verified saved WS parts.'}
   return [pscustomobject]@{tasks=@($results);warnings=@($warnings)}
 }
 
@@ -1265,13 +1371,16 @@ function Invoke-SigmaNestAutoTask($Request){
     if($null -eq $app){throw 'SigmaNEST.SNApp returned null.'}
     $phase='LOAD_WORKSPACE'
     [void]$app.LoadWorkSpaceFile([string]$wsPath)
-    Start-Sleep -Milliseconds 250
-    $phase='APPLY_CL_PART_DATA'
-    $partUpdates=SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts -jobName ([string]$Request.jobName)
+    Start-Sleep -Milliseconds 400
+    # Verify and snapshot the actual saved workspace. No CL payload is accepted
+    # here: material, thickness, quantity and BatchQty must already be correct.
+    $phase='VERIFY_SAVED_WS_DATA'
+    $workspaceParts=@(SN-Read-WorkspaceProductionData -app $app)
+    if($workspaceParts.Count -le 0){throw 'No production part data could be read from the saved WS.'}
 
     # An imported workspace contains PartsList entries but not necessarily the
-    # task objects that SigmaNEST AutoTask expects. Build the TasksList from the
-    # imported workspace first, then let AutoTask organize/nest those tasks.
+    # task objects that SigmaNEST AutoTask expects. Build tasks from the saved
+    # parts, then let AutoTask organize/nest them.
     $phase='CREATE_TASKS_FOR_IMPORTED_PARTS'
     [void]$app.CreateTasksListForNewPartsInWS()
     Start-Sleep -Milliseconds 500
@@ -1292,11 +1401,8 @@ function Invoke-SigmaNestAutoTask($Request){
     if($taskCount -le 0){
       throw 'SigmaNEST AutoTask completed but no TasksList entries are present.'
     }
-    $phase='APPLY_TASK_CL_DATA'
-    SN-Set-TaskMaterialAndThickness -app $app -requestParts $Request.parts
-    SN-Set-TaskPartQuantity -app $app -requestParts $Request.parts
     $phase='LABEL_AND_BATCH'
-    $taskData=SN-Set-TaskNameAndBatch -app $app -requestParts $Request.parts
+    $taskData=SN-Set-TaskNameAndBatch -app $app -workspaceParts $workspaceParts
     $phase='SAVE'
     $save=SN-Save-WorkspaceVerified -app $app -wsPath $wsPath -label 'AutoTask'
     # Refresh the existing SigmaNEST UI without reloading the workspace. Reloading
@@ -1308,9 +1414,9 @@ function Invoke-SigmaNestAutoTask($Request){
     return [pscustomobject]@{
       ok=$ok;phase='AUTOTASK_COMPLETE';wsPath=$wsPath;tasksCreated=$taskCount
       partCount=(SN-Parts-Count $app);importedCount=(SN-Parts-Count $app)
-      parts=@($Request.parts)
-      taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@($partUpdates)
-      message=$(if($ok){'AutoTask created, labeled and batched '+$taskCount+' task(s).'}else{'AutoTask created '+$taskCount+' task(s) with warnings; see the Release Summary.'})
+      parts=@($workspaceParts)
+      taskData=$taskData.tasks;warnings=$taskData.warnings;partUpdates=@()
+      message=$(if($ok){'AutoTask used the saved WS production data and completed '+$taskCount+' task(s), including batch multipliers.'}else{'AutoTask completed '+$taskCount+' task(s) with warnings; see the Release Summary.'})
     }
   }catch{
     return [pscustomobject]@{
