@@ -71,8 +71,10 @@
     if(Array.isArray(matrix)&&Number.isInteger(headerRow)&&headerRow>0){
       for(let r=0;r<headerRow;r++){
         const row=matrix[r]||[];
+        // These rows are above the detected part-table header, so a
+        // "Part" column index is not meaningful here: the title/instruction
+        // often occupies that same cell (e.g. "Please cut four (4X) ...").
         for(let c=0;c<row.length;c++){
-          if(Number.isInteger(partIdx)&&c===partIdx)continue;
           candidates.push.apply(candidates,multiplierTokens(row[c]));
         }
       }
