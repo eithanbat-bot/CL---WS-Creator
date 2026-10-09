@@ -16,7 +16,7 @@ $partName=[IO.Path]::GetFileNameWithoutExtension($DxfPath)
 $outDir=Join-Path $env:TEMP 'CL-WS-Creator-FullE2ETest'
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 $jobName='CLWS-E2E-'+[Guid]::NewGuid().ToString('N').Substring(0,10)
-$importResult=$null;$autoResult=$null;$verify=$null;$wsPath=''
+$importResult=$null;$autoResult=$null;$verify=$null;$verifyAutomation=$null;$wsPath=''
 try{
   $rp=[pscustomobject]@{
     part=$partName;qty=$TestQty;sigmaMaterial=$TestMaterial;thicknessMm=$TestThicknessMm
@@ -52,8 +52,12 @@ try{
   if(@($autoResult.taskData).Count -lt 1){throw 'AutoTask did not return task labels/batch confirmations.'}
   if(@($autoResult.taskData|Where-Object{$_.labelApplied -and $_.batchApplied -and [int]$_.batchMultiplier -eq $BatchMultiplier}).Count -lt 1){throw "AutoTask did not confirm label and batch multiplier x$BatchMultiplier."}
 
+  $verifyAutomation=New-Object -ComObject SigmaNEST.SNAutomation
+  [void]$verifyAutomation.FileNew()
+  Start-Sleep -Milliseconds 250
   $verify=New-Object -ComObject SigmaNEST.SNApp
   [void]$verify.LoadWorkSpaceFile([string]$wsPath)
+  Start-Sleep -Milliseconds 250
   $found=SN-Find-WorkspacePartExact -app $verify -targetName $partName -sourcePath $DxfPath -usedIndices @()
   if($null -eq $found){throw "Saved workspace does not contain the selected DXF part $partName."}
   $m=SN-Read-PartField -partObj $found.part -aliases @('Material','MaterialName','Mat','MatName','MaterialType') -expectedText $TestMaterial
@@ -113,5 +117,6 @@ try{
   }|ConvertTo-Json -Depth 20
 }finally{
   if($verify){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($verify)}catch{}}
+  if($verifyAutomation){try{[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($verifyAutomation)}catch{}}
   if($wsPath -and (Test-Path -LiteralPath $wsPath)){Remove-Item -LiteralPath $wsPath -Force -ErrorAction SilentlyContinue}
 }
