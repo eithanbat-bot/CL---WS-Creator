@@ -32,7 +32,7 @@ $shardReader=$server.Substring($shardStart,$shardEnd-$shardStart)
 Assert ($shardReader.Contains('$columns=$line.Split([char]9)')) 'DXF shard reader does not split TSV columns correctly.'
 Assert ($shardReader.Contains('$file=[string]$columns[1]')) 'DXF shard reader does not use the File column.'
 Assert (-not $shardReader.Contains('$file=$line.Substring($tab+1)')) 'DXF shard reader still appends timestamp/length to the file path.'
-Assert ($serverVersion -eq '2.30.0') "Unexpected bridge version: $serverVersion"
+Assert ($serverVersion -eq '2.32.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
@@ -41,6 +41,10 @@ Assert ($com -match '\$phase\s*=\s*''CREATE_TASKS_FOR_IMPORTED_PARTS''') 'AutoTa
 Assert ($com -match '\$phase\s*=\s*''AUTO_TASK''') 'AutoTask phase missing.'
 Assert ($com.Contains('try{[void]$app.RefreshTreeView()}catch{}')) 'SigmaNEST tree refresh missing or return value is not suppressed.'
 Assert ($com.Contains('function SN-Set-QtyToNest')) 'Canonical SigmaNEST QtyToNest setter is missing.'
+Assert ($com.Contains("'BatchQty','BatchQuantity','BatchMultiplier','Batch'")) 'Import does not write a persisted BatchQty multiplier to the SigmaNEST PartsList.'
+Assert ($com.Contains('BatchQty multiplier is not')) 'Import verification does not verify the persisted batch multiplier.'
+Assert ($com.Contains('function SN-Read-WorkspaceProductionData($app)')) 'AutoTask is missing the saved-WS production-data reader.'
+Assert ($com.Contains('effectiveBatchQuantity=')) 'CL link file does not retain effective batch quantities.'
 Assert ($com.Contains("'NumberToNest','NumberToLoad','QtyToNest")) 'Fallback part quantity aliases are not present.'
 Assert ($com.Contains("[void](SN-Verify-WorkspaceCLData")) 'Import verification output is not suppressed.'
 Assert ($worker.Contains('$rawEngineData=@(if($mode -eq ''IMPORT_ONLY'')')) 'Worker does not capture complete engine pipeline output.'
@@ -66,7 +70,7 @@ Assert ($bat.Contains('?cb=') -and $bat.Contains('$cb')) 'Bootstrap does not cac
 Assert ($com.Contains("function SN-Queue-Geometry(`$app,[string]`$sourcePath,[string]`$sourceType,`$clData=`$null,`$automation=`$null)")) 'Geometry queue does not accept the workspace automation object.'
 Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
 Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
-Assert ($com.Contains('$partMultis=@()')) 'Task batch logic does not collect multipliers per part.'
+Assert ($com.Contains('$multis+= [int]$rp.batchMultiplier')) 'Task batch logic does not read multipliers from the saved workspace snapshot.'
 Assert ($com.Contains('[void]$automation.AddPartImport([string]$x.sourcePath,[double]1.0,[double]1.0,0,0,0)')) 'DXF import does not use SigmaNEST AddPartImport.'
 Assert ($com.Contains("importMethod=`$(if(`$sourceType -eq 'DXF'){'AddPartImport-DXF-GEOMETRY'}else{'LoadPart-PRS-GEOMETRY'})")) 'Import result does not distinguish DXF and PRS loading.'
 Assert ($com.Contains('[void]$automation.ResetSigmaNEST()')) 'Import/AutoTask does not clear stale SigmaNEST workspace rows before loading.'
@@ -77,8 +81,15 @@ Assert ($autoBodyStart -ge 0 -and $autoBodyEnd -gt $autoBodyStart) 'AutoTask met
 $autoBody=$com.Substring($autoBodyStart,$autoBodyEnd-$autoBodyStart)
 Assert ($autoBody.Contains('[void]$automation.FileNew()')) 'AutoTask does not reset the existing SigmaNEST workspace before loading the saved job.'
 Assert ($autoBody.IndexOf('[void]$automation.FileNew()') -lt $autoBody.IndexOf('[void]$app.LoadWorkSpaceFile([string]$wsPath)')) 'AutoTask loads the saved job before clearing existing PartsList entries.'
+Assert ($autoBody.Contains('SN-Read-WorkspaceProductionData -app $app')) 'AutoTask does not snapshot production values from the saved WS.'
+Assert ($autoBody.Contains('SN-Set-TaskNameAndBatch -app $app -workspaceParts $workspaceParts')) 'AutoTask does not use batch multipliers read from the saved WS.'
+Assert (-not $autoBody.Contains('SN-Apply-WorkspacePartData -app $app -requestParts $Request.parts')) 'AutoTask is still overwriting saved WS values from an Excel/CL request.'
+Assert (-not $autoBody.Contains('SN-Set-TaskPartQuantity')) 'AutoTask must not reapply CL quantities after AutoTask.'
+Assert (-not $autoBody.Contains('SN-Set-TaskMaterialAndThickness')) 'AutoTask must not reapply CL material/thickness after AutoTask.'
 Assert ($taskpane.Contains('function normalizeParts(parts)')) 'Task pane null-part guard missing.'
-Assert ($taskpane.Contains("No valid CL parts are available for AutoTask")) 'Task pane AutoTask input guard missing.'
+Assert ($taskpane.Contains('sole source of material, thickness, quantity and batch multiplier')) 'AutoTask task pane must explain that the saved WS is its sole production-data source.'
+Assert (-not $taskpane.Substring($taskpane.IndexOf('async function autoTaskOrder()'),$taskpane.IndexOf('async function checkBridge(')-$taskpane.IndexOf('async function autoTaskOrder()')).Contains('readCL()')) 'AutoTask must not reread or resend CL data.'
+Assert ($taskpane.Contains("autoTaskOrder').disabled=!currentWsPath")) 'AutoTask must remain available from a saved WS without a loaded CL.'
 
 # Import must remain task-free; AutoTask owns task creation.
 $importStart=$com.IndexOf('function Invoke-SigmaNestImportGeometry')
