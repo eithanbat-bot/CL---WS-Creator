@@ -40,6 +40,7 @@ $part=[pscustomobject]@{
   NumberToNest=99
   BatchQty=1
   Material='OLD'
+  Remark=''
   Thickness=3.0
 }
 $partsApp=[pscustomobject]@{PartsList=(New-List @($part))}
@@ -48,6 +49,7 @@ Assert ($partUpdates.Count -eq 1) 'Import part update did not return exactly one
 Assert ([int]$part.QtyToNest -eq 4) ("PartList QtyToNest must remain per-vehicle 4; got $($part.QtyToNest).")
 Assert ([int]$part.BatchQty -eq 1) ("PartList BatchQty must remain x1 until task list creation; got $($part.BatchQty).")
 Assert ($part.Material -eq 'MS') ("PartList material was not changed to MS; got $($part.Material).")
+Assert ($part.Remark -eq 'TEST BRACKET') 'PartList Remark did not receive the CL description.'
 Assert ([double]$part.Thickness -eq 8.0) ("PartList thickness was not changed to 8mm; got $($part.Thickness).")
 Assert ([int]$partUpdates[0].batchMultiplier -eq 4) 'Import result did not preserve the CL batch multiplier.'
 Assert ([string]$partUpdates[0].batchProperty -eq 'TASKS_LIST.PartsList.BatchQty') 'Import result did not identify where batch data will be persisted.'
@@ -60,6 +62,7 @@ $taskPart=[pscustomobject]@{
   DrawingNumber='TEST-001'
   PartFilename='C:\TEST\TEST-001.DXF'
   Material='OLD'
+  Remark=''
   Thickness=3.0
   QtyToNest=99
   BatchQty=1
@@ -75,6 +78,8 @@ $taskUpdates=@(SN-Apply-TaskCLData -app $taskApp -requestParts @($requestPart))
 Assert ($taskUpdates.Count -eq 1) 'CL task-data preparation did not return exactly one verified task-part update.'
 Assert ([int]$task.BatchQuantity -eq 4) ("TasksList BatchQuantity was not set to 4; got $($task.BatchQuantity).")
 Assert ($taskPart.Material -eq 'MS') ("TasksList part material was not changed to MS; got $($taskPart.Material).")
+Assert ($taskPart.Remark -eq 'TEST BRACKET') 'TasksList Remark did not receive the CL description.'
+Assert ($taskUpdates[0].descriptionProperty -eq 'TASKS_LIST.PartsList.Remark') 'Task update did not report the persisted CL description field.'
 Assert ([double]$taskPart.Thickness -eq 8.0) ("TasksList part thickness was not changed to 8mm; got $($taskPart.Thickness).")
 Assert ([int]$taskPart.BatchQty -eq 4) ("TasksList part BatchQty was not set to 4; got $($taskPart.BatchQty).")
 Assert ([int]$taskPart.QtyToNest -eq 4) ("TasksList QtyToNest was multiplied; expected per-vehicle 4, got $($taskPart.QtyToNest).")
@@ -87,6 +92,7 @@ Assert ($snapshot[0].sigmaMaterial -eq 'MS') 'Saved-WS snapshot did not read mat
 Assert ([double]$snapshot[0].thicknessMm -eq 8.0) 'Saved-WS snapshot did not read thickness from TasksList.'
 Assert ([int]$snapshot[0].qty -eq 4) 'Saved-WS snapshot did not read per-vehicle quantity from TasksList.'
 Assert ([int]$snapshot[0].batchMultiplier -eq 4) 'Saved-WS snapshot did not read the batch multiplier from TasksList.'
+Assert ($snapshot[0].description -eq 'TEST BRACKET') 'Saved-WS snapshot did not read the CL description from SigmaNEST Remark.'
 
 # --- Tasking uses only the saved snapshot: no external CL payload is required ---
 $taskResult=SN-Set-TaskNameAndBatch -app $taskApp -workspaceParts $snapshot
