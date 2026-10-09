@@ -789,24 +789,14 @@ function SN-Queue-Geometry($app,[string]$sourcePath,[string]$sourceType,$clData=
   $errors=@()
 
   if($sourceType -eq 'DXF'){
-    # Use the exact selected DXF. Add2DDXFPart initializes a new WS correctly;
-    # SNApp.LoadPart can create a PartsList entry without a saveable workspace.
-    if($null -ne $automation){
-      $before=SN-Parts-Count $app
-      try{
-        [void]$automation.Add2DDXFPart([string]$sourcePath)
-        Start-Sleep -Milliseconds 200
-        $after=SN-Parts-Count $app
-        if($after -le $before){throw ('SNAutomation.Add2DDXFPart did not add a SigmaNEST part; PartsList count remained '+$after+'.')}
-        return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='SNAutomation.Add2DDXFPart-DXF-GEOMETRY'}
-      }catch{
-        $errors+=('SNAutomation.Add2DDXFPart: '+(SN-ErrorText $_))
-      }
-      throw ('SigmaNEST could not import the selected .DXF "'+$label+'". No PRS fallback was attempted. '+($errors -join ' | '))
-    }
-    # Legacy callers without an automation object use the exact-path load path.
+    # Import the exact selected DXF through SNApp.LoadPart. On this SigmaNEST
+    # build LoadPart can return $false while still adding the DXF to PartsList;
+    # the caller verifies the committed part count after
+    # CreatePartsListForNewPartsInWS. Add2DDXFPart returned without adding a
+    # part on an empty workspace, so it is intentionally not used here.
     try{
       [void]$app.LoadPart([string]$sourcePath)
+      Start-Sleep -Milliseconds 200
       return [pscustomobject]@{ok=$true;label=$label;sourcePath=$sourcePath;sourceType='DXF';method='LoadPart-DXF-GEOMETRY'}
     }catch{
       $errors+=('LoadPart-DXF: '+(SN-ErrorText $_))
