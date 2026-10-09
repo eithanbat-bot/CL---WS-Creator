@@ -141,7 +141,10 @@ function SN-Try-SetField($obj,[string[]]$names,$value,[string]$expectedText='',$
 function SN-ComPropertyNames($obj){
   if($null -eq $obj){return @()}
   try{
-    return @($obj | Get-Member -MemberType Property -ErrorAction Stop | Select-Object -ExpandProperty Name -Unique)
+    # Include ordinary .NET/COM properties plus PowerShell NoteProperty and
+    # ScriptProperty members. COM uses Property members; deterministic tests
+    # and adapter wrappers commonly expose the same contract as NoteProperties.
+    return @($obj | Get-Member -MemberType Property,NoteProperty,ScriptProperty,AliasProperty -ErrorAction Stop | Select-Object -ExpandProperty Name -Unique)
   }catch{return @()}
 }
 function SN-ComMethodNames($obj){
