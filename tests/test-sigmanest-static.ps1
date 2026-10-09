@@ -105,6 +105,8 @@ Assert (-not $importBody.Contains('AutoTask()')) 'Import Geometry must prepare t
 Assert ($importBody.Contains('-DeferBatchToTasks')) 'Import Geometry must keep the PartsList BatchQty at x1 until TasksList creation.'
 Assert ($importBody.Contains('SN-Apply-TaskCLData -app $app -requestParts $queued')) 'Import Geometry must apply the batch multiplier and CL data to TasksList before saving.'
 Assert ($importBody.Contains('SN-Verify-WorkspaceTaskData -app $app -requestParts $queued')) 'Import Geometry must verify the saved task-side CL data before enabling AutoTask.'
-Assert ($importBody.Contains('SN-Verify-Saved-WorkspaceCLData')) 'Import Geometry must verify production values after reopening the saved workspace.'
+Assert ($importBody.Contains("[void](SN-Verify-WorkspaceCLData -app `$app -requestParts `$queued)")) 'Import Geometry must verify CL fields in the reopened saved PartsList.'
+Assert ($importBody.Contains("[void](SN-Verify-WorkspaceTaskData -app `$app -requestParts `$queued)")) 'Import Geometry must verify batch and production fields in the reopened saved TasksList.'
+Assert ($importBody.Contains("$phase='VERIFY_SAVED_CL_TASK_DATA'")) 'Import Geometry must verify the saved TasksList before releasing the workspace.'
 
 Write-Host ("SigmaNEST static release gate: PASS (bridge $serverVersion)") -ForegroundColor Green
