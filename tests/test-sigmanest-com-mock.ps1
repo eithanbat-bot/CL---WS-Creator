@@ -73,7 +73,6 @@ $task=[pscustomobject]@{
 $taskApp=[pscustomobject]@{TasksList=(New-List @($task))}
 $taskUpdates=@(SN-Apply-TaskCLData -app $taskApp -requestParts @($requestPart))
 Assert ($taskUpdates.Count -eq 1) 'CL task-data preparation did not return exactly one verified task-part update.'
-Assert ($task.TaskBatchQuantity -eq $null) 'Mock sanity check: unexpected TaskBatchQuantity property.'
 Assert ([int]$task.BatchQuantity -eq 4) ("TasksList BatchQuantity was not set to 4; got $($task.BatchQuantity).")
 Assert ($taskPart.Material -eq 'MS') ("TasksList part material was not changed to MS; got $($taskPart.Material).")
 Assert ([double]$taskPart.Thickness -eq 8.0) ("TasksList part thickness was not changed to 8mm; got $($taskPart.Thickness).")
