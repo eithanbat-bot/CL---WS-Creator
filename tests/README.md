@@ -16,7 +16,7 @@ This runs static architecture/release checks and the deterministic COM mock. Git
 
 This creates a temporary workspace from the selected DXF, imports it through SigmaNEST's automation interface, applies the CL values, creates tasks, applies batch/order labels and reload-verifies the saved result. It deletes its temporary workspace after the check.
 
-By default the test DXF is `Y:\SOLIDWORKS\UNIVERSAL COMPONENTS\PC-2A.DXF`. Override it with `-DxfPath "Y:\path\to\another-part.DXF"` and optionally pass `-TestQty`, `-TestMaterial`, `-TestThicknessMm` and `-BatchMultiplier`.
+By default the test DXF is `Y:\AutoCAD\Hino old\Hino 300\Rear Bodies\SBV\2023 (HSW) SBV Hino 300 816 Body\Dxf Files\PC-2A.DXF`. Override it with `-DxfPath "Y:\path\to\another-part.DXF"` and optionally pass `-TestQty`, `-TestMaterial`, `-TestThicknessMm` and `-BatchMultiplier`.
 
 ## Live bridge HTTP end-to-end test
 
