@@ -3,6 +3,7 @@ $ErrorActionPreference='Stop'
 $Root=Split-Path -Parent $PSScriptRoot
 $server=Get-Content -Raw (Join-Path $Root 'bridge\server.ps1')
 $worker=Get-Content -Raw (Join-Path $Root 'bridge\build-worker.ps1')
+$updater=Get-Content -Raw (Join-Path $Root 'bridge\update-and-start.ps1')
 $com=Get-Content -Raw (Join-Path $Root 'bridge\sigmanest-com.ps1')
 $taskpane=Get-Content -Raw (Join-Path $Root 'taskpane.js')
 
@@ -26,7 +27,7 @@ $shardReader=$server.Substring($shardStart,$shardEnd-$shardStart)
 Assert ($shardReader.Contains('$columns=$line.Split([char]9)')) 'DXF shard reader does not split TSV columns correctly.'
 Assert ($shardReader.Contains('$file=[string]$columns[1]')) 'DXF shard reader does not use the File column.'
 Assert (-not $shardReader.Contains('$file=$line.Substring($tab+1)')) 'DXF shard reader still appends timestamp/length to the file path.'
-Assert ($serverVersion -eq '2.24.0') "Unexpected bridge version: $serverVersion"
+Assert ($serverVersion -eq '2.25.0') "Unexpected bridge version: $serverVersion"
 
 Assert ($com.Contains("function Invoke-SigmaNestImportGeometry")) 'Import entry point missing.'
 Assert ($com.Contains("function Invoke-SigmaNestAutoTask")) 'AutoTask entry point missing.'
@@ -45,6 +46,8 @@ Assert ($com.Contains('[void]$app.CreatePartsListForNewPartsInWS()')) 'Import ge
 Assert ($com.Contains('[void]$automation.FileNew()')) 'Import Geometry does not initialize a new SigmaNEST workspace.'
 Assert ($com.Contains('[void]$automation.Add2DDXFPart([string]$sourcePath)')) 'Import Geometry does not use the tested DXF import method.'
 Assert ($com.Contains('[void]$automation.FileSave([string]$wsPath,0,0)')) 'Import Geometry does not use the tested workspace save method.'
+Assert ($updater.Contains('$entry.ValidatedStage')) 'Updater does not install from the validated runtime stage.'
+Assert ($updater.Contains('Stage=$manifestStage')) 'Updater does not install manifest from its validated staging copy.'
 Assert ($com.Contains("function SN-Queue-Geometry(`$app,[string]`$sourcePath,[string]`$sourceType,`$clData=`$null,`$automation=`$null)")) 'Geometry queue does not accept the workspace automation object.'
 Assert ($com.Contains('[void]$app.CreateTasksListForNewPartsInWS()')) 'Task creation pipeline output is not suppressed.'
 Assert ($com.Contains('[void]$app.AutoTask()')) 'AutoTask pipeline output is not suppressed.'
